@@ -1,0 +1,8 @@
+0.6
+2018.3
+Dec  7 2018
+00:33:28
+F:/vivado/Project/KTH/milestone3/milestone3.sim/sim_1/behav/xsim/glbl.v,1544155481,verilog,,,,glbl,,,,,,,,
+F:/vivado/Project/KTH/milestone3/milestone3.srcs/sim_1/new/tb_memory_system.sv,1759938384,systemVerilog,,,,tb_memory_system,,,,,,,,
+F:/vivado/Project/KTH/milestone3/milestone3.srcs/sources_1/ip/blk_mem_gen_0/sim/blk_mem_gen_0.v,1759909422,verilog,,,,blk_mem_gen_0,,,,,,,,
+F:/vivado/Project/KTH/milestone3/milestone3.srcs/sources_1/new/memory_system.sv,1759937932,systemVerilog,,F:/vivado/Project/KTH/milestone3/milestone3.srcs/sim_1/new/tb_memory_system.sv,,memory_system,,,,,,,,
