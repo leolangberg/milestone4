@@ -3,7 +3,14 @@ module top (
 	input logic clk,
 	input logic rst_n,
 	input logic start,
-	output logic test_alu_out
+	output logic [31:0] test_alu_out,
+	output logic [31:0] test_sram_data_out,
+	output logic [31:0] test_sram_data_in,
+	output logic test_mem_ready,
+	output logic [31:0] test_IR,
+	output logic [4:0] test_PC,
+	output logic [1:0] test_state,
+	output logic test_sram_read_en
 );
 
 
@@ -13,12 +20,15 @@ logic sram_read_en;
 logic sram_write_en;
 logic sram_mem_ready;
 logic load_IR;
+logic load_PC;
 logic alu_src;
 
 controller CU (
 	.clk(clk),
 	.rst_n(rst_n),
 	.start(start),
+	.test_state(test_state),
+	.test_sram_read_en(test_sram_read_en),
 
 	.rf_chip_en(rf_chip_en),
 	.rf_write_en_n(rf_write_en_n),
@@ -26,6 +36,7 @@ controller CU (
 	.sram_write_en(sram_write_en),
 	.sram_mem_ready(sram_mem_ready),
 	.load_IR(load_IR),
+	.load_PC(load_PC),
 	.alu_src(alu_src)
 );
 
@@ -33,6 +44,11 @@ datapath DP(
 	.clk(clk),
 	.rst_n(rst_n),
 	.test_alu_out(test_alu_out),
+	.test_mem_ready(test_mem_ready),
+	.test_IR(test_IR),
+	.test_PC(test_PC),
+	.test_sram_data_out(test_sram_data_out),
+	.test_sram_data_in(test_sram_data_in),
 
 	.rf_chip_en(rf_chip_en),
 	.rf_write_en_n(rf_write_en_n),
@@ -40,17 +56,21 @@ datapath DP(
 	.sram_write_en(sram_write_en),
 	.sram_mem_ready(sram_mem_ready),
 	.load_IR(load_IR),
+	.load_PC(load_PC),
 	.alu_src(alu_src)
 	
 );
 
 endmodule;
 
+
 /* CONTROLLER CU */
 module controller (
 	input logic clk,
 	input logic rst_n,
 	input logic start,
+	output logic [1:0] test_state,
+	output logic test_sram_read_en,
 
 	// Interface with Datapath
 	output logic rf_chip_en,
@@ -59,13 +79,19 @@ module controller (
 	output logic sram_write_en,
 	input logic sram_mem_ready,
 	output logic load_IR,
+	output logic load_PC,
 	output logic alu_src
 
 );
 
 
-typedef enum logic [1:0] { IDLE, INIT,  FETCH, EXECUTE1 } state;
+typedef enum logic [2:0] { IDLE, INIT,  FETCH, EXECUTE } state;
 state prev_state, next_state;
+
+always_ff @(posedge clk or negedge rst_n) begin
+    if(!rst_n) prev_state <= IDLE;
+    else prev_state <= next_state;
+end
 
 always_comb begin
 	// Initialization
@@ -74,37 +100,52 @@ always_comb begin
 	sram_read_en = 0;
 	sram_write_en = 0;
 	alu_src = 0;
+	load_PC = 0;
+	load_IR = 0;
 
-	case (prev_state) 
-		IDLE: next_state = start ? INIT : IDLE;
-		INIT: next_state = start ? INIT : FETCH;
-	
-		FETCH: begin
-			if(sram_mem_ready == 1) begin
-				// Wait until memory is ready then go to next state.
-				// load_IR is 1 which means IR register will now hold instruction.
-				next_state = EXECUTE;
-				load_IR = 1;
-			end else begin
-				// When memory is ready load instruction in Instr. Reg. (IR)
-				// This is done by setting sram_read_en here.
-				// We ask "is mem ready" and it returns 1 when ready.
-				sram_read_en = 1;
-				next_state = FETCH;
-			end
+	case (prev_state)
+            IDLE: begin
+                next_state = start ? INIT : IDLE;
+            end
 
-		EXECUTE1: begin
-			next_state = FETCH;
-			rf_chip_en = 1;
-			rf_write_en_n = 1;
-			alu_src = 1;	
-		
-		end
-		default: next_state = IDLE;
-	endcase
+            INIT: begin
+                next_state = start ? INIT : FETCH;
+            end
+
+            FETCH: begin
+                rf_chip_en = 1;    
+                sram_read_en = 1;
+                if (sram_mem_ready == 1) begin
+                    // Memory is ready, load instruction into IR
+                    next_state = EXECUTE;
+                     load_IR = 1;
+                     load_PC = 1; // go to next instruction.     
+             
+                end else begin
+                    // Wait for memory to be ready and read instruction
+                    next_state = FETCH;
+                end
+            end
+            EXECUTE: begin
+                next_state = FETCH;
+                sram_read_en = 0;
+                rf_chip_en = 1;      
+                rf_write_en_n = 0;   
+                alu_src = 1;    
+              
+            end
+
+            default: begin
+                next_state = IDLE; 
+            end
+        endcase
 end
 
+assign test_state = prev_state;
+assign test_sram_read_en = sram_read_en;
+
 endmodule;
+
 
 /* DATAPATH DP */
 module datapath (
@@ -112,7 +153,12 @@ module datapath (
 	input logic rst_n,
 
 	// for testing output
-	output logic test_alu_out,
+	output logic [31:0] test_alu_out,
+	output logic test_mem_ready,
+	output logic [31:0] test_IR,
+	output logic [31:0] test_sram_data_out,
+	output logic [31:0] test_sram_data_in,
+	output logic [4:0] test_PC,
 
 	// Interface with Controller 
 	input logic rf_chip_en,
@@ -121,11 +167,12 @@ module datapath (
 	input logic sram_write_en,
 	output logic sram_mem_ready,
 	input logic load_IR,
+	input logic load_PC,
 	input logic alu_src
 );
 
 
-logic [4:0] PC; // PROGRAM COUNTER 
+logic [31:0] PC; // PROGRAM COUNTER 
 logic [31:0] IR; // INSTRUCTION REGISTER
 
 // ================================
@@ -190,7 +237,7 @@ ALU #(.BW(32)) alu(
 // Address is updated either via IR (PC)
 // or by "load" or "store" operations.
 // ================================
-logic [4:0] 	sram_addr; // not sure about size.
+logic [31:0] 	sram_addr; // not sure about size.
 logic [31:0] 	sram_data_in;
 logic [31:0] 	sram_data_out;
 
@@ -241,6 +288,11 @@ always_comb begin
 end;
 
 assign test_alu_out = alu_out;
+assign test_mem_ready = sram_mem_ready;
+assign test_IR = IR;
+assign test_PC = PC;
+assign test_sram_data_out = sram_data_out;
+assign test_sram_data_in = sram_data_in;
 
 /* PROGRAM COUNTER */
 // Holds Instruction pointer Register (IR)
@@ -248,7 +300,7 @@ assign test_alu_out = alu_out;
 always_ff @(posedge clk or negedge rst_n) begin
 	if(!rst_n) begin
 		PC <= '0;
-	end else begin
+	end else if (load_PC) begin
 		PC <= PC + 4;
 	end
 end
@@ -259,7 +311,6 @@ always_ff @(posedge clk or negedge rst_n) begin
 		IR <= '0;
 	else if (load_IR)
 		IR <= sram_data_out;
-	end
 end
 
 endmodule;
