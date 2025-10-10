@@ -1,0 +1,11 @@
+0.6
+2018.3
+Dec  7 2018
+00:33:28
+C:/Users/Quint/Downloads/mile4.sv,1760088866,systemVerilog,,C:/Users/Quint/Downloads/rf.sv,,datapath,,,,,,,,
+C:/Users/Quint/Downloads/rf.sv,1760087920,systemVerilog,,F:/vivado/Project/KTH/milestone4/milestone4.srcs/sim_1/new/dp_tb.sv,,RF,,,,,,,,
+F:/vivado/Project/KTH/milestone4/milestone4.sim/sim_1/behav/xsim/glbl.v,1544155481,verilog,,,,glbl,,,,,,,,
+F:/vivado/Project/KTH/milestone4/milestone4.srcs/sim_1/new/dp_tb.sv,1760087570,systemVerilog,,,,dp_tb,,,,,,,,
+F:/vivado/Project/KTH/milestone4/milestone4.srcs/sources_1/ip/sram/sim/sram.v,1760085648,verilog,,,,sram,,,,,,,,
+F:/vivado/Project/KTH/milestone4/milestone4.srcs/sources_1/new/alu.sv,1760087168,systemVerilog,,F:/vivado/Project/KTH/milestone4/milestone4.srcs/sources_1/new/memory_system.sv,,ALU,,,,,,,,
+F:/vivado/Project/KTH/milestone4/milestone4.srcs/sources_1/new/memory_system.sv,1760085834,systemVerilog,,C:/Users/Quint/Downloads/mile4.sv,,memory_system,,,,,,,,

@@ -1,0 +1,2 @@
+sram.v,verilog,xil_defaultlib,../../../../milestone4.srcs/sources_1/ip/sram/sim/sram.v,
+glbl.v,Verilog,xil_defaultlib,glbl.v
