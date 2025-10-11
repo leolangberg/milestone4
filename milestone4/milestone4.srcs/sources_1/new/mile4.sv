@@ -22,6 +22,9 @@ logic sram_mem_ready;
 logic load_IR;
 logic load_PC;
 logic alu_src;
+logic alu_opcode_mux;
+logic [6:0] ctrl_opcode;
+logic [2:0] ctrl_func3;
 
 controller CU (
 	.clk(clk),
@@ -35,6 +38,9 @@ controller CU (
 	.sram_read_en(sram_read_en),
 	.sram_write_en(sram_write_en),
 	.sram_mem_ready(sram_mem_ready),
+	.ctrl_opcode(ctrl_opcode),
+	.ctrl_func3(ctrl_func3),
+	.alu_opcode_mux(alu_opcode_mux),
 	.load_IR(load_IR),
 	.load_PC(load_PC),
 	.alu_src(alu_src)
@@ -55,6 +61,9 @@ datapath DP(
 	.sram_read_en(sram_read_en),
 	.sram_write_en(sram_write_en),
 	.sram_mem_ready(sram_mem_ready),
+	.ctrl_opcode(ctrl_opcode),
+	.ctrl_func3(ctrl_func3),
+	.alu_opcode_mux(alu_opcode_mux),
 	.load_IR(load_IR),
 	.load_PC(load_PC),
 	.alu_src(alu_src)
@@ -78,12 +87,19 @@ module controller (
 	output logic sram_read_en,
 	output logic sram_write_en,
 	input logic sram_mem_ready,
+	input instruction_opcode ctrl_opcode,	// [6:0] opcode.
+	input logic [2:0] ctrl_func3,
+	output logic alu_opcode_mux,
 	output logic load_IR,
 	output logic load_PC,
 	output logic alu_src
 
 );
 
+typedef enum logic [6:0] { 
+	RTYPE = 7'b0110011, 
+	ITYPE = 7'b0010011
+} instruction_opcode;
 
 typedef enum logic [2:0] { IDLE, INIT,  FETCH, EXECUTE } state;
 state prev_state, next_state;
@@ -100,6 +116,7 @@ always_comb begin
 	sram_read_en = 0;
 	sram_write_en = 0;
 	alu_src = 0;
+	alu_opcode_mux = 0;
 	load_PC = 0;
 	load_IR = 0;
 
@@ -128,11 +145,30 @@ always_comb begin
             end
             EXECUTE: begin
                 next_state = FETCH;
-                sram_read_en = 0;
                 rf_chip_en = 1;      
                 rf_write_en_n = 0;   
-                alu_src = 1;    
-              
+
+		case (ctrl_opcode)
+			RTYPE : begin
+				// RTYPE instructions read only from register 
+				// and use {func3, func7[5]}
+				alu_opcode_mux 	= 1'b0;
+				alu_src 	= 1'b0;
+			end
+			ITYPE : begin
+				// ITYPE instructions read from imm
+				// and use {func3, 0} (except for SLL, SRL, SRA)
+				alu_opcode_mux 	= 1'b1;
+                		alu_src 	= 1'b1;
+
+				if((ctrl_func3 == 3'b001) || (ctrl_func3 == 3'b101))
+					alu_opcode_mux = 1'b0;
+			end
+			default: begin
+				// This case is for invalid opcodes (shutdown).
+				// next_state = IDLE;
+			end
+		endcase
             end
 
             default: begin
@@ -166,6 +202,8 @@ module datapath (
 	input logic sram_read_en,
 	input logic sram_write_en,
 	output logic sram_mem_ready,
+	output logic ctrl_opcode,
+	output logic ctrl_func3,
 	input logic load_IR,
 	input logic load_PC,
 	input logic alu_src
@@ -269,6 +307,10 @@ always_comb begin
 	rs2	= IR[24:20];
 	func7	= IR[31:25];
 
+	// Pass instruction parts to controller
+	ctrl_opcode = opcode;
+	ctrl_func3  = func3; 	
+
 	/* LOGIC FOR I-TYPE INSTRUCTION */
 	// Immidiate is sign extended and shifted to 32-bit value.
 	imm	= {20'd0, IR[31:20]};
@@ -279,8 +321,10 @@ always_comb begin
 	rf_read_addr_2  = rs2;
  
 	/* ALU CONNECTIONS */
+	// alu_opcode needs to ignore func7[5] for ITYPE instructions, we therefore
+	// have a mux with signal from controller based on instruction opcode.
 	// alu_src decides to read from register (R) or immediate (I).
-	alu_opcode 	= {func3, func7[5]}; 
+	alu_opcode 	= (alu_opcode_mux) ? {func3, 1'b0} : {func3, func7[5]}; 
 	alu_in_a 	= rf_data_out_1;
 	alu_in_b 	= (alu_src) ? (imm) : (rf_data_out_2);
 	rf_data_in 	= alu_out;
