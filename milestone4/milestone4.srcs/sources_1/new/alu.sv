@@ -36,7 +36,7 @@ module ALU #( BW = 32 ) (
 		SRL	= 4'b1010,
 		SRA	= 4'b1011,
 		OR	= 4'b1100,
-		AND	= 4'b1110,
+		AND	= 4'b1110
 		
 	} alu_op;
 
@@ -76,4 +76,4 @@ module ALU #( BW = 32 ) (
 	
 	assign flags = {v,n,z};
 	
-e
+endmodule;
