@@ -72,6 +72,10 @@ datapath DP(
 
 endmodule;
 
+typedef enum logic [6:0] { 
+	RTYPE = 7'b0110011, 
+	ITYPE = 7'b0010011
+} instruction_opcode;
 
 /* CONTROLLER CU */
 module controller (
@@ -96,10 +100,6 @@ module controller (
 
 );
 
-typedef enum logic [6:0] { 
-	RTYPE = 7'b0110011, 
-	ITYPE = 7'b0010011
-} instruction_opcode;
 
 typedef enum logic [2:0] { IDLE, INIT,  FETCH, EXECUTE } state;
 state prev_state, next_state;
@@ -202,11 +202,12 @@ module datapath (
 	input logic sram_read_en,
 	input logic sram_write_en,
 	output logic sram_mem_ready,
-	output logic ctrl_opcode,
-	output logic ctrl_func3,
+	output logic [6:0] ctrl_opcode,
+	output logic [2:0] ctrl_func3,
 	input logic load_IR,
 	input logic load_PC,
-	input logic alu_src
+	input logic alu_src,
+	input logic alu_opcode_mux
 );
 
 

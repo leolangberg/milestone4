@@ -58,14 +58,14 @@ module ALU #( BW = 32 ) (
 		if (opcode == ADD) begin
 			// 2 positive numbers give negative sign or
 			// 2 negative numbers give positive sign
-			if((in_a[BW-1] & in_b[BW-1] & ~w[BW-1]) | 
-			  (~in_a[BW-1] & ~in_b[BW-1] & w[BW-1]))
+			if((in_a[BW-1] & in_b[BW-1] & ~out[BW-1]) | 
+			  (~in_a[BW-1] & ~in_b[BW-1] & out[BW-1]))
 				v = 1'b1;
 		end
 		if(opcode == SUB) begin
 			// same as addition but in subtraction in_b is inversed. (A + (-B))
-			if((in_a[BW-1] & ~in_b[BW-1] & ~w[BW-1]) | 
-			  (~in_a[BW-1] & in_b[BW-1] & w[BW-1]))
+			if((in_a[BW-1] & ~in_b[BW-1] & ~out[BW-1]) | 
+			  (~in_a[BW-1] & in_b[BW-1] & out[BW-1]))
 				v = 1'b1;
 		end
 
