@@ -18,6 +18,7 @@ module memory_system (
   wire [13:0] addra_w = addr[15:2];    // 64 KiB / 4B = 16K words -> 14-bit
 
   // Byte select derived from addr[1:0]
+  // INCORRECT BECAUSE WHAT IF WE WANT TO WRITE 4-BYTE WORD???
   logic [3:0] wea_mask;
   always_comb begin
     unique case (addr[1:0])
