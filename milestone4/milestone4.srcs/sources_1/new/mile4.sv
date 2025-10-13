@@ -11,6 +11,7 @@ logic sram_read_en;
 logic sram_write_en;
 logic [2:0] sram_read_mask_mux;
 logic [1:0] sram_addr_mux;
+logic [1:0] sram_addr_imm_mux;
 logic sram_mem_ready;
 logic load_IR;
 logic load_PC;
@@ -31,6 +32,7 @@ controller CU (
 	.sram_write_en(sram_write_en),
 	.sram_read_mask_mux(sram_read_mask_mux),
 	.sram_addr_mux(sram_addr_mux),
+	.sram_addr_imm_mux(sram_addr_imm_mux),
 	.sram_mem_ready(sram_mem_ready),
 	.ctrl_opcode(ctrl_opcode),
 	.ctrl_func3(ctrl_func3),
@@ -52,6 +54,7 @@ datapath DP(
 	.sram_write_en(sram_write_en),
 	.sram_read_mask_mux(sram_read_mask_mux),
 	.sram_addr_mux(sram_addr_mux),
+	.sram_addr_imm_mux(sram_addr_imm_mux),
 	.sram_mem_ready(sram_mem_ready),
 	.ctrl_opcode(ctrl_opcode),
 	.ctrl_func3(ctrl_func3),
@@ -87,6 +90,7 @@ module controller (
 	output logic sram_write_en,
 	output logic [2:0] sram_read_mask_mux,
 	output logic [1:0] sram_addr_mux,
+	output logic [1:0] sram_addr_imm_mux,
 	input logic sram_mem_ready,
 	input instruction_opcode ctrl_opcode,	// [6:0] opcode.
 	input logic [2:0] ctrl_func3,
@@ -115,6 +119,7 @@ always_comb begin
 	sram_write_en 		= 0;
 	sram_read_mask_mux 	= 3'b000;
 	sram_addr_mux		= 2'b00;
+	sram_addr_imm_mux	= 2'b00;
 	alu_src 		= 2'b00;
 	alu_opcode_mux 		= 0;
 	load_PC 		= 0;
@@ -241,7 +246,8 @@ always_comb begin
 						endcase
 					end else begin
 						next_state = EXECUTE2;
-						sram_read_en  = 1;
+						sram_read_en  	  = 1;
+						sram_addr_imm_mux = 2'b00; // use imm[31:0]
 						// ==================================================
 						// SRAM_ADDR_MUX
 						// ==================================================
@@ -267,24 +273,23 @@ always_comb begin
 				STYPE : begin
 					// For Store operations we set the address according to byte size
 					// Then we just wait for mem_ready...
-					if(mem_ready == 1) begin
+					if(sram_mem_ready == 1) begin
 						next_state = FETCH;
 					end else begin
 						next_state = EXECUTE2;
 						sram_write_en = 1;
+						sram_addr_imm_mux = 2'b01; // use imm[31:25] imm[11:7]
 						// ==================================================
-						// SRAM_ADDR_MUX
+						// SRAM_ADDR_WRITE_MUX (needs to separate because not same IMM.
 						// ==================================================
 						// 00 		PC
 						// 01 		4 BYTE WORD
 						// 10		2 BYTE HALFWORD
 						// 11		1 BYTE
 						case (ctrl_func3) 
-							3'b000 : sram_addr_mux 		= 2'b11;
-							3'b001 : sram_addr_mux		= 2'b10;
-							3'b010 : sram_addr_mux		= 2'b01;
-							3'b100 : sram_addr_mux		= 2'b11;
-							3'b101 : sram_addr_mux		= 2'b10;
+							3'b000 : sram_addr_mux 	= 2'b11;
+							3'b001 : sram_addr_mux 	= 2'b10;
+							3'b010 : sram_addr_mux	= 2'b01;
 						endcase
 					end
 				end
@@ -312,6 +317,7 @@ module datapath (
 	input logic sram_write_en,
 	input logic [2:0] sram_read_mask_mux,
 	input logic [1:0] sram_addr_mux,
+	input logic [1:0] sram_addr_imm_mux,
 	output logic sram_mem_ready,
 	output logic [6:0] ctrl_opcode,
 	output logic [2:0] ctrl_func3,
@@ -338,7 +344,7 @@ logic [6:0] func7;
 logic [31:0] imm;	// originally [11:0] but sign extend.
 logic [31:0] shamt;	// originally [4:0]  but sign extend.
 // ================================
-
+logic [31:0] sram_addr_imm;
 
 /* Register File */
 // 32-bit registers with 32 depth (5-bit addr).
@@ -426,6 +432,8 @@ always_comb begin
 	// SHAMT is used for immediate shift amount (zero extend).
 	imm	= {{20{IR[31]}}, IR[31:20]};
 	shamt	= {27'd0, imm[4:0]};
+
+	/* LOGIC FOR STYPE INSTRUCTION */
 	
 	/* REGISTER FILE CONNECTIONS */
 	rf_write_addr 	= rd1;
@@ -476,10 +484,19 @@ always_comb begin
 	// BYTE	 1 BYTE : address can be any value.
 	case (sram_addr_mux) 
 		2'b00 : sram_addr = PC;
-		2'b01 : sram_addr = (rf_data_out_1 + imm) & ~(2'b11); 	// 4 byte
-		2'b10 : sram_addr = (rf_data_out_1 + imm) & ~(1'b1);	// 2 byte
-		2'b11 : sram_addr = (rf_data_out_1 + imm);		// 1 byte
+		2'b01 : sram_addr = (rf_data_out_1 + sram_addr_imm) & ~(2'b11); // 4 byte
+		2'b10 : sram_addr = (rf_data_out_1 + sram_addr_imm) & ~(1'b1);	// 2 byte
+		2'b11 : sram_addr = (rf_data_out_1 + sram_addr_imm);		// 1 byte
 		default: sram_addr = PC;
+	endcase
+
+	// Decides how to construct immediate value used as part of address calculation.
+	// 00 for ITYPE IMM[31:0] 
+	// 01 for STYPE IMM[31:25] IMM[11:7]
+	case (sram_addr_imm_mux)
+		2'b00 : sram_addr_imm = imm;
+		2'b01 : sram_addr_imm = {20'd0,  IR[31:25], IR[11:7]};
+		default: sram_addr_imm = imm;
 	endcase
 end;
 
