@@ -98,7 +98,7 @@ module controller (
 );
 
 
-typedef enum logic [2:0] { IDLE, INIT,  FETCH, EXECUTE1, EXECUTE2} state;
+typedef enum logic [2:0] { IDLE, INIT,  FETCH, FETCH2, EXECUTE1, EXECUTE2, HELLO} state;
 state prev_state, next_state;
 
 always_ff @(posedge clk or negedge rst_n) begin
@@ -130,11 +130,28 @@ always_comb begin
 			rf_chip_en 	= 1;    
 			rf_write_en_n	= 1;
 			if (sram_mem_ready == 1) begin
-				next_state = EXECUTE;
-				load_IR 	= 1;
+				next_state = EXECUTE1;
+				load_IR 	   = 1;
+				
 			end else begin
 				next_state = FETCH;
 				sram_read_en 	= 1;
+				
+			end
+		end
+		
+		FETCH2: begin
+			// Wait for memory to be ready and read instruction
+			// Memory is ready, load instruction into IR
+			rf_chip_en 	= 1;    
+			rf_write_en_n	= 1;
+			if (sram_mem_ready == 1) begin
+				next_state = EXECUTE1;
+				
+			end else begin
+				next_state = FETCH2;
+				sram_read_en 	= 1;
+				
 			end
 		end
 		// ===========================================
@@ -200,9 +217,9 @@ always_comb begin
 					// When mem_ready is 1 we manipulate input and WRITE then go FETCH.
 					// Otherwise wait for mem_ready and hold address mux open.
 					if(sram_mem_ready == 1'b1) begin
-						rf_data_in_mux = 2'b11; // Read from SRAM into RF.
-						rf_write_en_n 	= 0;
-						next_state = FETCH;
+						
+						next_state = HELLO;
+						load_IR 	   = 1;
 						// ==================================================
 						// SRAM_READ_MASK_MUX
 						// ==================================================
@@ -248,7 +265,23 @@ always_comb begin
 					end
 				end
 			endcase
-
+		end
+		HELLO : begin
+			        rf_data_in_mux = 2'b11; // Read from SRAM into RF.
+					rf_write_en_n 	= 0;
+					next_state = FETCH2;
+			    case (ctrl_func3) 
+							// LB: [rd] = SIGNEXT(MEM[rs1+imm]) read single byte.
+							// LH: [rd] = SIGNEXT(MEM[rs1+imm]) read 2 bytes.
+							// LW: [rd] = MEM[rs1+imm] read 4 bytes.
+							// LBU : [rd] = ZEROEXT(MEM[rs1+imm]) read single byte.
+							// LHU : [rd] = ZEROEXT(MEM[rs1+imm]) read 2 bytes.
+							3'b000 : sram_read_mask_mux 	= 3'b010;	
+							3'b001 : sram_read_mask_mux 	= 3'b001;
+							3'b010 : sram_read_mask_mux	= 3'b000;
+							3'b100 : sram_read_mask_mux 	= 3'b100;
+							3'b101 : sram_read_mask_mux 	= 3'b011;
+				endcase
 		end
 		
 
@@ -437,8 +470,7 @@ always_comb begin
 		2'b10 : sram_addr = ({27'd0, rs1} + imm) & ~(1'b1);	// 2 byte
 		2'b11 : sram_addr = ({27'd0, rs1} + imm);		// 1 byte
 		default: sram_addr = PC;
-	end
-
+	endcase
 end;
 
 /* PROGRAM COUNTER */
@@ -451,12 +483,3 @@ always_ff @(posedge clk or negedge rst_n) begin
 		PC <= PC + 4;
 	end
 end
-
-/* INSTRUCTION REGISTER (IR) */
-always_ff @(posedge clk or negedge rst_n) begin
-	if(!rst_n) 
-		IR <= '0;
-	else if (load_IR)
-		IR <= sram_data_out;	// CHANGE TO SRAM_DATA_OUT_MASKED???
-end
-endmodule;
