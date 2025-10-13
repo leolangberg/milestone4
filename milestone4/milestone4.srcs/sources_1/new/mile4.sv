@@ -139,21 +139,6 @@ always_comb begin
 				
 			end
 		end
-		
-		FETCH2: begin
-			// Wait for memory to be ready and read instruction
-			// Memory is ready, load instruction into IR
-			rf_chip_en 	= 1;    
-			rf_write_en_n	= 1;
-			if (sram_mem_ready == 1) begin
-				next_state = EXECUTE1;
-				
-			end else begin
-				next_state = FETCH2;
-				sram_read_en 	= 1;
-				
-			end
-		end
 		// ===========================================
 		// STATE: 	EXECUTE1
 		// ===========================================
@@ -218,8 +203,10 @@ always_comb begin
 					// Otherwise wait for mem_ready and hold address mux open.
 					if(sram_mem_ready == 1'b1) begin
 						
-						next_state = HELLO;
-						load_IR 	   = 1;
+						next_state = FETCH;
+						rf_data_in_mux = 2'b11; // Read from SRAM into RF.
+					       rf_write_en_n 	= 0;
+						
 						// ==================================================
 						// SRAM_READ_MASK_MUX
 						// ==================================================
@@ -266,26 +253,8 @@ always_comb begin
 				end
 			endcase
 		end
-		HELLO : begin
-			        rf_data_in_mux = 2'b11; // Read from SRAM into RF.
-					rf_write_en_n 	= 0;
-					next_state = FETCH2;
-			    case (ctrl_func3) 
-							// LB: [rd] = SIGNEXT(MEM[rs1+imm]) read single byte.
-							// LH: [rd] = SIGNEXT(MEM[rs1+imm]) read 2 bytes.
-							// LW: [rd] = MEM[rs1+imm] read 4 bytes.
-							// LBU : [rd] = ZEROEXT(MEM[rs1+imm]) read single byte.
-							// LHU : [rd] = ZEROEXT(MEM[rs1+imm]) read 2 bytes.
-							3'b000 : sram_read_mask_mux 	= 3'b010;	
-							3'b001 : sram_read_mask_mux 	= 3'b001;
-							3'b010 : sram_read_mask_mux	= 3'b000;
-							3'b100 : sram_read_mask_mux 	= 3'b100;
-							3'b101 : sram_read_mask_mux 	= 3'b011;
-				endcase
-		end
-		
-
-            default: begin
+	
+          default: begin
                 next_state = IDLE; 
             end
         endcase
@@ -483,3 +452,12 @@ always_ff @(posedge clk or negedge rst_n) begin
 		PC <= PC + 4;
 	end
 end
+
+/* INSTRUCTION REGISTER (IR) */
+always_ff @(posedge clk or negedge rst_n) begin
+	if(!rst_n) 
+		IR <= '0;
+	else if (load_IR)
+		IR <= sram_data_out;	// CHANGE TO SRAM_DATA_OUT_MASKED???
+end
+endmodule;
