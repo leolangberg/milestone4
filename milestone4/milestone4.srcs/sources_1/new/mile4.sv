@@ -204,8 +204,9 @@ always_comb begin
 					if(sram_mem_ready == 1'b1) begin
 						
 						next_state = FETCH;
-						rf_data_in_mux = 2'b11; // Read from SRAM into RF.
-					       rf_write_en_n 	= 0;
+						  rf_data_in_mux = 2'b11; // Read from SRAM into RF.
+                          rf_write_en_n 	= 0;
+						
 						
 						// ==================================================
 						// SRAM_READ_MASK_MUX
@@ -252,6 +253,11 @@ always_comb begin
 					end
 				end
 			endcase
+		end
+		HELLO : begin
+		  rf_data_in_mux = 2'b11; // Read from SRAM into RF.
+		   rf_write_en_n 	= 0;
+		   next_state = FETCH;
 		end
 	
           default: begin
@@ -317,7 +323,7 @@ logic [31:0] 	rf_data_out_2;
 RF #(.BW(32), .DEPTH(32)) rf(
 	.clk(clk),
 	.rst_n(rst_n),
-	.data_in(rf_data_in),
+	.data_in(sram_data_out), // sram_data_out
 	.read_addr_1(rf_read_addr_1),
 	.read_addr_2(rf_read_addr_2),
 	.write_addr(rf_write_addr),
@@ -435,9 +441,9 @@ always_comb begin
 	// BYTE	 1 BYTE : address can be any value.
 	case (sram_addr_mux) 
 		2'b00 : sram_addr = PC;
-		2'b01 : sram_addr = ({27'd0, rs1} + imm) & ~(2'b11); 	// 4 byte
-		2'b10 : sram_addr = ({27'd0, rs1} + imm) & ~(1'b1);	// 2 byte
-		2'b11 : sram_addr = ({27'd0, rs1} + imm);		// 1 byte
+		2'b01 : sram_addr = (rf_data_out_1 + imm) & ~(2'b11); 	// 4 byte
+		2'b10 : sram_addr = (rf_data_out_1 + imm) & ~(1'b1);	// 2 byte
+		2'b11 : sram_addr = (rf_data_out_1 + imm);		// 1 byte
 		default: sram_addr = PC;
 	endcase
 end;
