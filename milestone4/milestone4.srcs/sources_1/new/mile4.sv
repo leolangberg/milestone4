@@ -70,7 +70,8 @@ typedef enum logic [6:0] {
 	ITYPEIMM	= 7'b0010011,
 	ITYPELOAD	= 7'b0000011,
 	UTYPELUI	= 7'b0110111,
-	UTYPEAUIPC	= 7'b0010111
+	UTYPEAUIPC	= 7'b0010111,
+	STYPE		= 7'b0100011
 } instruction_opcode;
 
 /* CONTROLLER CU */
@@ -98,7 +99,7 @@ module controller (
 );
 
 
-typedef enum logic [2:0] { IDLE, INIT,  FETCH, FETCH2, EXECUTE1, EXECUTE2, HELLO} state;
+typedef enum logic [2:0] { IDLE, INIT,  FETCH, EXECUTE1, EXECUTE2 } state;
 state prev_state, next_state;
 
 always_ff @(posedge clk or negedge rst_n) begin
@@ -145,7 +146,7 @@ always_comb begin
 		EXECUTE1: begin
 			next_state 	= FETCH;
 			rf_chip_en 	= 1;      
-			rf_write_en_n 	= 0;   
+			rf_write_en_n 	= 1;   
 			load_PC 	= 1; // go to next instruction.     
 
 			case (ctrl_opcode)
@@ -154,6 +155,7 @@ always_comb begin
 					// and use {func3, func7[5]}
 					alu_opcode_mux 	= 0;
 					alu_src 	= 2'b00;
+					rf_write_en_n = 0;
 				end
 				ITYPEIMM : begin
 					// ITYPE instructions read from imm
@@ -161,6 +163,7 @@ always_comb begin
 					// SLL SRL SRA use func7[5] and immediate shift (shamt = imm[4:0])
 					alu_opcode_mux 	= 1;
 					alu_src 	= 2'b01;
+					rf_write_en_n = 0;
 
 					if((ctrl_func3 == 3'b001) || (ctrl_func3 == 3'b101)) begin
 						alu_opcode_mux 	= 0;
@@ -176,10 +179,19 @@ always_comb begin
 				UTYPELUI : begin
 					// Load RD = {IMM[31:12], 12'd0} directly.
 					rf_data_in_mux = 2'b01;
+					rf_write_en_n = 0;
 				end
 				UTYPEAUIPC : begin
 					// Load RD = PC + {IMM[31:12], 12'd0} directly.
 					rf_data_in_mux = 2'b10;
+					rf_write_en_n = 0;
+				end
+				STYPE : begin
+					// STORE INSTRUCTION
+					// MEM[rs1 + imm] = [rs2]
+					next_state = EXECUTE2;
+					rf_write_en_n = 1;
+					
 				end
 				default: begin
 					// This case is for invalid opcodes (shutdown).
@@ -204,8 +216,8 @@ always_comb begin
 					if(sram_mem_ready == 1'b1) begin
 						
 						next_state = FETCH;
-						  rf_data_in_mux = 2'b11; // Read from SRAM into RF.
-                          rf_write_en_n 	= 0;
+						rf_data_in_mux = 2'b11; // Read from SRAM into RF.
+                          			rf_write_en_n 	= 0;
 						
 						// ==================================================
 						// SRAM_READ_MASK_MUX
@@ -251,14 +263,33 @@ always_comb begin
 						endcase
 					end
 				end
+
+				STYPE : begin
+					// For Store operations we set the address according to byte size
+					// Then we just wait for mem_ready...
+					if(mem_ready == 1) begin
+						next_state = FETCH;
+					end else begin
+						next_state = EXECUTE2;
+						sram_write_en = 1;
+						// ==================================================
+						// SRAM_ADDR_MUX
+						// ==================================================
+						// 00 		PC
+						// 01 		4 BYTE WORD
+						// 10		2 BYTE HALFWORD
+						// 11		1 BYTE
+						case (ctrl_func3) 
+							3'b000 : sram_addr_mux 		= 2'b11;
+							3'b001 : sram_addr_mux		= 2'b10;
+							3'b010 : sram_addr_mux		= 2'b01;
+							3'b100 : sram_addr_mux		= 2'b11;
+							3'b101 : sram_addr_mux		= 2'b10;
+						endcase
+					end
+				end
 			endcase
 		end
-		HELLO : begin
-		  rf_data_in_mux = 2'b11; // Read from SRAM into RF.
-		   rf_write_en_n 	= 0;
-		   next_state = FETCH;
-		end
-	
           default: begin
                 next_state = IDLE; 
             end
@@ -435,7 +466,9 @@ always_comb begin
 	endcase
 
 	/* SRAM CONNECTIONS */
-
+	
+	// Write data is specified by inside of register 2 [rs2].
+	sram_data_in = rf_data_out_2;
 	
 	// SRAM_ADDR is either PC or direct value but this value has to be aligned.
 	// WORD  4 BYTE : address is aligned to multiple of 4.

@@ -18,7 +18,7 @@ module memory_system (
   wire [13:0] addra_w = addr[15:2];    // 64 KiB / 4B = 16K words -> 14-bit
 
   // Byte select derived from addr[1:0]
-  // INCORRECT BECAUSE WHAT IF WE WANT TO WRITE 4-BYTE WORD???
+/*
   logic [3:0] wea_mask;
   always_comb begin
     unique case (addr[1:0])
@@ -28,7 +28,7 @@ module memory_system (
       2'b11: wea_mask = 4'b1000; // highest byte
     endcase
   end
-
+*/
   // ---------- FSM ----------
   typedef enum logic [1:0] {IDLE, READ, WRITE, DONE} state_t;
   state_t state, nstate;
@@ -77,12 +77,13 @@ module memory_system (
         end
         WRITE: begin
           ip_ena   <= 1'b1;
-          ip_wea   <= wea_mask;      // byte-wise write enable
+          ip_wea   <= 4'b1111;      // byte-wise write enable
           ip_addra <= addra_w;
           ip_dina  <= data_in;
         end
         DONE: begin
-          ip_ena <= 1'b0; ip_wea <= 4'b0000;
+          ip_ena <= 1'b0; 
+	  ip_wea <= 4'b0000;
         end
       endcase
     end
