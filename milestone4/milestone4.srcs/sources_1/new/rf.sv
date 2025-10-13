@@ -54,16 +54,14 @@ module RF #(
     // -----------------------------
     always_comb begin
         // Default: outputs 0 (Standby or when chip_en=0)
- //       data_out_1 = '0;
- //       data_out_2 = '0;
+        data_out_1 = '0;
+        data_out_2 = '0;
 
         // Read: pass-through selected registers when chip enabled
- //       if (1'd1) begin//chip_en
- //           data_out_1 = mem[read_addr_1];
- //           data_out_2 = mem[read_addr_2];
-        data_out_1 = 32'd1;
-        data_out_2 = 32'd2;
+        if (chip_en) begin//chip_en
+            data_out_1 = mem[read_addr_1];
+            data_out_2 = mem[read_addr_2];
         end
- //   end
+    end
 
 endmodule
