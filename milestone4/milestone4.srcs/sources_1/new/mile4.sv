@@ -440,6 +440,10 @@ always_comb begin
 	rf_read_addr_1 	= rs1;
 	rf_read_addr_2  = rs2;
 	
+	// =========================================================================
+	// =   Muxes that work together have to be nested otherwise bugs occur...  =
+	// =========================================================================
+	
 	// Special cases for UTYPE (LUI) and (AUIPC) that have direct link into rf_data_in.
 	// Last case is for Load instructions going from sram directly to rf_data_in.
 	case (rf_data_in_mux)
@@ -479,25 +483,40 @@ always_comb begin
 	sram_data_in = rf_data_out_2;
 	
 	// SRAM_ADDR is either PC or direct value but this value has to be aligned.
-	// WORD  4 BYTE : address is aligned to multiple of 4.
-	// HWORD 2 BYTE : address is aligned to multiple of 2.
-	// BYTE	 1 BYTE : address can be any value.
-	case (sram_addr_mux) 
-		2'b00 : sram_addr = PC;
-		2'b01 : sram_addr = (rf_data_out_1 + sram_addr_imm) & ~(2'b11); // 4 byte
-		2'b10 : sram_addr = (rf_data_out_1 + sram_addr_imm) & ~(1'b1);	// 2 byte
-		2'b11 : sram_addr = (rf_data_out_1 + sram_addr_imm);		// 1 byte
-		default: sram_addr = PC;
-	endcase
-
-	// Decides how to construct immediate value used as part of address calculation.
+    // WORD  4 BYTE : address is aligned to multiple of 4.
+    // HWORD 2 BYTE : address is aligned to multiple of 2.
+    // BYTE	 1 BYTE : address can be any value.
+    // SRAM_ADDR_IMM Decides how to construct immediate value used 
+    // as part of address calculation.
 	// 00 for ITYPE IMM[31:0] 
 	// 01 for STYPE IMM[31:25] IMM[11:7]
-	case (sram_addr_imm_mux)
-		2'b00 : sram_addr_imm = imm;
-		2'b01 : sram_addr_imm = {20'd0,  IR[31:25], IR[11:7]};
-		default: sram_addr_imm = imm;
-	endcase
+	case (sram_addr_mux) 
+                2'b00 : sram_addr = PC;
+                2'b01 : begin
+                    case (sram_addr_imm_mux)
+                        2'b00 : sram_addr_imm = imm;
+                        2'b01 : sram_addr_imm = {20'd0,  IR[31:25], IR[11:7]};
+                    endcase
+                    sram_addr = (rf_data_out_1 + sram_addr_imm) & ~(2'b11); // 4 byte
+                end
+                2'b10 : begin
+                    case (sram_addr_imm_mux)
+                        2'b00 : sram_addr_imm = imm;
+                        2'b01 : sram_addr_imm = {20'd0,  IR[31:25], IR[11:7]};
+                    endcase
+                    sram_addr = (rf_data_out_1 + sram_addr_imm) & ~(1'b1);	// 2 byte
+                end
+                2'b11 : begin
+                    case (sram_addr_imm_mux)
+                        2'b00 : sram_addr_imm = imm;
+                        2'b01 : sram_addr_imm = {20'd0,  IR[31:25], IR[11:7]};
+                    endcase
+                    sram_addr = (rf_data_out_1 + sram_addr_imm);		// 1 byte
+                end
+                default: sram_addr = PC;
+            endcase
+
+	
 end;
 
 /* PROGRAM COUNTER */
