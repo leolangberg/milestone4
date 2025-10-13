@@ -67,7 +67,8 @@ module memory_system (
     end else begin
       unique case (nstate) // look-ahead to hold enables cleanly
         IDLE: begin
-          ip_ena <= 1'b0; ip_wea <= 4'b0000;
+          ip_ena <= 1'b0; 
+	  ip_wea <= 4'b0000;
         end
         READ: begin
           ip_ena   <= 1'b1;
@@ -97,4 +98,4 @@ module memory_system (
     .douta (ip_douta)
   );
 
-endmodule
+endmodule;

@@ -109,7 +109,7 @@ end
 always_comb begin
 	// Initialization
 	rf_chip_en 		= 0;
-	rf_write_en_n 		= 0;
+	rf_write_en_n 		= 1;
 	sram_read_en 		= 0;
 	sram_write_en 		= 0;
 	sram_read_mask_mux 	= 3'b000;
@@ -128,22 +128,23 @@ always_comb begin
 			// Wait for memory to be ready and read instruction
 			// Memory is ready, load instruction into IR
 			rf_chip_en 	= 1;    
-			sram_read_en 	= 1;
+			rf_write_en_n	= 1;
 			if (sram_mem_ready == 1) begin
 				next_state = EXECUTE;
 				load_IR 	= 1;
-				load_PC 	= 1; // go to next instruction.     
 			end else begin
 				next_state = FETCH;
+				sram_read_en 	= 1;
 			end
 		end
 		// ===========================================
-		// STATE: 	EXECUTE2
+		// STATE: 	EXECUTE1
 		// ===========================================
 		EXECUTE1: begin
 			next_state 	= FETCH;
 			rf_chip_en 	= 1;      
 			rf_write_en_n 	= 0;   
+			load_PC 	= 1; // go to next instruction.     
 
 			case (ctrl_opcode)
 				RTYPE : begin
@@ -191,15 +192,17 @@ always_comb begin
 		EXECUTE2 : begin
 			next_state 	= FETCH;
 			rf_chip_en 	= 1;      
-			rf_write_en_n 	= 0;   
+			rf_write_en_n 	= 1;   
 
 			case (ctrl_opcode)
 				ITYPELOAD : begin
 					// On first cycle we set the address and call sram_read_en.
-					// When mem_ready is 1 we manipulate input and go to FETCH
+					// When mem_ready is 1 we manipulate input and WRITE then go FETCH.
 					// Otherwise wait for mem_ready and hold address mux open.
-					sram_read_en  = 1;
 					if(sram_mem_ready == 1'b1) begin
+						rf_data_in_mux = 2'b11; // Read from SRAM into RF.
+						rf_write_en_n 	= 0;
+						next_state = FETCH;
 						// ==================================================
 						// SRAM_READ_MASK_MUX
 						// ==================================================
@@ -220,9 +223,9 @@ always_comb begin
 							3'b100 : sram_read_mask_mux 	= 3'b100;
 							3'b101 : sram_read_mask_mux 	= 3'b011;
 						endcase
-						rf_data_in_mux = 2'b11; // Read from SRAM into RF.
 					end else begin
 						next_state = EXECUTE2;
+						sram_read_en  = 1;
 						// ==================================================
 						// SRAM_ADDR_MUX
 						// ==================================================
@@ -266,6 +269,7 @@ module datapath (
 	// Interface with Controller 
 	input logic rf_chip_en,
 	input logic rf_write_en_n,
+	input logic [1:0] rf_data_in_mux,
 	input logic sram_read_en,
 	input logic sram_write_en,
 	input logic [2:0] sram_read_mask_mux,
@@ -349,6 +353,7 @@ ALU #(.BW(32)) alu(
 logic [31:0] 	sram_addr; // not sure about size.
 logic [31:0] 	sram_data_in;
 logic [31:0] 	sram_data_out;
+logic [31:0]	sram_data_out_masked;
 
 memory_system sram(
 	.clk(clk),
@@ -381,7 +386,7 @@ always_comb begin
 	/* LOGIC FOR I-TYPE INSTRUCTION */
 	// Immidiate is sign extended and shifted to 32-bit value.
 	// SHAMT is used for immediate shift amount (zero extend).
-	imm	= {20{IR[31]}, IR[31:20]};
+	imm	= {{20{IR[31]}}, IR[31:20]};
 	shamt	= {27'd0, imm[4:0]};
 	
 	/* REGISTER FILE CONNECTIONS */
@@ -416,8 +421,8 @@ always_comb begin
 	// Also there are unsigned and signed extensions of bytes and halfwords.
 	case (sram_read_mask_mux)
 		3'b000 : sram_data_out_masked = sram_data_out;
-		3'b001 : sram_data_out_masked = {16{sram_data_out[15]}, sram_data_out[15:0]}; 
-		3'b010 : sram_data_out_masked = {24{sram_data_out[7]}, sram_data_out[7:0]}; 
+		3'b001 : sram_data_out_masked = {{16{sram_data_out[15]}}, sram_data_out[15:0]}; 
+		3'b010 : sram_data_out_masked = {{24{sram_data_out[7]}}, sram_data_out[7:0]}; 
 		3'b011 : sram_data_out_masked = {16'd0, sram_data_out[15:0]};
 		3'b100 : sram_data_out_masked = {24'd0, sram_data_out[7:0]};
 	endcase
@@ -427,11 +432,11 @@ always_comb begin
 	// HWORD 2 BYTE : address is aligned to multiple of 2.
 	// BYTE	 1 BYTE : address can be any value.
 	case (sram_addr_mux) 
-		2'b00 : sram_addr <= PC;
-		2'b01 : sram_addr <= ({27'd0, rs1} + imm) & ~(2'b11); 	// 4 byte
-		2'b10 : sram_addr <= ({27'd0, rs1} + imm) & ~(1'b1);	// 2 byte
-		2'b11 : sram_addr <= ({27'd0, rs1} + imm);		// 1 byte
-		default: sram_addr <= PC;
+		2'b00 : sram_addr = PC;
+		2'b01 : sram_addr = ({27'd0, rs1} + imm) & ~(2'b11); 	// 4 byte
+		2'b10 : sram_addr = ({27'd0, rs1} + imm) & ~(1'b1);	// 2 byte
+		2'b11 : sram_addr = ({27'd0, rs1} + imm);		// 1 byte
+		default: sram_addr = PC;
 	end
 
 end;
