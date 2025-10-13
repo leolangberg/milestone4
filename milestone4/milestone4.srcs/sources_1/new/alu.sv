@@ -13,20 +13,7 @@
  * SRA 		0110011 101	0100000		[rd] = [rs1] >>> [rs2]
  * OR 		0110011 110	0000000		[rd] = [rs1] | [rs2]
  * AND		0110011 111	0000000		[rd] = [rs1] & [rs2]
- */
-module ALU #( BW = 32 ) (
-	input  logic signed [BW-1:0] in_a,
-	input  logic signed [BW-1:0] in_b,
-	input  alu_op       	     opcode, 
-	output logic signed [BW-1:0] out,
-	output logic        [2:0] flags 
-);
-	// alu_op means [3:0]
-	// {overflow, negative, zero}
-	// opcode: {func3, func7[5]}
-	logic v, n, z, c;
-
-	typedef enum logic [3:0] {
+ */typedef enum logic [3:0] {
 		ADD 	= 4'b0000,
 		SUB 	= 4'b0001,
 		SLT 	= 4'b0100,
@@ -39,6 +26,20 @@ module ALU #( BW = 32 ) (
 		AND	= 4'b1110
 		
 	} alu_op;
+	
+module ALU #( BW = 32 ) (
+	input  logic signed [BW-1:0] in_a,
+	input  logic signed [BW-1:0] in_b,
+	input  alu_op       	     opcode, 
+	output logic signed [BW-1:0] out,
+	output logic        [2:0] flags 
+);
+	// alu_op means [3:0]
+	// {overflow, negative, zero}
+	// opcode: {func3, func7[5]}
+	logic v, n, z, c;
+
+	
 
 	always_comb begin
 		case(opcode)
@@ -75,5 +76,3 @@ module ALU #( BW = 32 ) (
 	assign z = (out == 0) ? 1 : 0;	// ~|out
 	
 	assign flags = {v,n,z};
-	
-endmodule;
