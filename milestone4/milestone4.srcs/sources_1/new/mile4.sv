@@ -207,7 +207,6 @@ always_comb begin
 						  rf_data_in_mux = 2'b11; // Read from SRAM into RF.
                           rf_write_en_n 	= 0;
 						
-						
 						// ==================================================
 						// SRAM_READ_MASK_MUX
 						// ==================================================
@@ -323,7 +322,7 @@ logic [31:0] 	rf_data_out_2;
 RF #(.BW(32), .DEPTH(32)) rf(
 	.clk(clk),
 	.rst_n(rst_n),
-	.data_in(sram_data_out), // sram_data_out
+	.data_in(rf_data_in), // sram_data_out
 	.read_addr_1(rf_read_addr_1),
 	.read_addr_2(rf_read_addr_2),
 	.write_addr(rf_write_addr),
@@ -408,7 +407,19 @@ always_comb begin
 		2'b00 : rf_data_in = alu_out;
 		2'b01 : rf_data_in = {IR[31:12], 12'd0};
 		2'b10 : rf_data_in = {IR[31:12], 12'd0} + PC;
-		2'b11 : rf_data_in = sram_data_out_masked;
+		2'b11 : begin
+		         // sram_data_out is masked for bytes (1b), halfwords (2b) , or words of (4b) (default).
+                // Also there are unsigned and signed extensions of bytes and halfwords.
+                case (sram_read_mask_mux)
+                    3'b000 : sram_data_out_masked = sram_data_out;
+                    3'b001 : sram_data_out_masked = {{16{sram_data_out[15]}}, sram_data_out[15:0]}; 
+                    3'b010 : sram_data_out_masked = {{24{sram_data_out[7]}}, sram_data_out[7:0]}; 
+                    3'b011 : sram_data_out_masked = {16'd0, sram_data_out[15:0]};
+                    3'b100 : sram_data_out_masked = {24'd0, sram_data_out[7:0]};
+                   default: sram_data_out_masked = sram_data_out;
+                endcase 
+		      rf_data_in = sram_data_out_masked;
+		end
 	endcase
  
 	/* ALU CONNECTIONS */
@@ -425,16 +436,7 @@ always_comb begin
 
 	/* SRAM CONNECTIONS */
 
-	// sram_data_out is masked for bytes (1b), halfwords (2b) , or words of (4b) (default).
-	// Also there are unsigned and signed extensions of bytes and halfwords.
-	case (sram_read_mask_mux)
-		3'b000 : sram_data_out_masked = sram_data_out;
-		3'b001 : sram_data_out_masked = {{16{sram_data_out[15]}}, sram_data_out[15:0]}; 
-		3'b010 : sram_data_out_masked = {{24{sram_data_out[7]}}, sram_data_out[7:0]}; 
-		3'b011 : sram_data_out_masked = {16'd0, sram_data_out[15:0]};
-		3'b100 : sram_data_out_masked = {24'd0, sram_data_out[7:0]};
-	endcase
-
+	
 	// SRAM_ADDR is either PC or direct value but this value has to be aligned.
 	// WORD  4 BYTE : address is aligned to multiple of 4.
 	// HWORD 2 BYTE : address is aligned to multiple of 2.
