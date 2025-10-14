@@ -12,6 +12,7 @@ logic sram_write_en;
 logic [2:0] sram_read_mask_mux;
 logic [1:0] sram_addr_mux;
 logic [1:0] sram_addr_imm_mux;
+logic [1:0] sram_addr_write_mux;
 logic sram_mem_ready;
 logic load_IR;
 logic load_PC;
@@ -33,6 +34,7 @@ controller CU (
 	.sram_read_mask_mux(sram_read_mask_mux),
 	.sram_addr_mux(sram_addr_mux),
 	.sram_addr_imm_mux(sram_addr_imm_mux),
+	.sram_addr_write_mux(sram_addr_write_mux),
 	.sram_mem_ready(sram_mem_ready),
 	.ctrl_opcode(ctrl_opcode),
 	.ctrl_func3(ctrl_func3),
@@ -55,6 +57,7 @@ datapath DP(
 	.sram_read_mask_mux(sram_read_mask_mux),
 	.sram_addr_mux(sram_addr_mux),
 	.sram_addr_imm_mux(sram_addr_imm_mux),
+	.sram_addr_write_mux(sram_addr_write_mux),
 	.sram_mem_ready(sram_mem_ready),
 	.ctrl_opcode(ctrl_opcode),
 	.ctrl_func3(ctrl_func3),
@@ -91,6 +94,7 @@ module controller (
 	output logic [2:0] sram_read_mask_mux,
 	output logic [1:0] sram_addr_mux,
 	output logic [1:0] sram_addr_imm_mux,
+	output logic [1:0] sram_addr_write_mux,
 	input logic sram_mem_ready,
 	input instruction_opcode ctrl_opcode,	// [6:0] opcode.
 	input logic [2:0] ctrl_func3,
@@ -120,6 +124,7 @@ always_comb begin
 	sram_read_mask_mux 	= 3'b000;
 	sram_addr_mux		= 2'b00;
 	sram_addr_imm_mux	= 2'b00;
+	sram_addr_write_mux	= 2'b00;
 	alu_src 		= 2'b00;
 	alu_opcode_mux 		= 0;
 	load_PC 		= 0;
@@ -249,24 +254,7 @@ always_comb begin
 						sram_read_en  	  = 1;
 						sram_addr_imm_mux = 2'b00; // use imm[31:0]
 						// ==================================================
-						// SRAM_ADDR_MUX
-						// ==================================================
-						// 00 		PC
-						// 01 		4 BYTE WORD
-						// 10		2 BYTE HALFWORD
-						// 11		1 BYTE
-						case (ctrl_func3) 
-							// LB: [rd] = SIGNEXT(MEM[rs1+imm]) read single byte.
-							// LH: [rd] = SIGNEXT(MEM[rs1+imm]) read 2 bytes.
-							// LW: [rd] = MEM[rs1+imm] read 4 bytes.
-							// LBU : [rd] = ZEROEXT(MEM[rs1+imm]) read single byte.
-							// LHU : [rd] = ZEROEXT(MEM[rs1+imm]) read 2 bytes.
-							3'b000 : sram_addr_mux 		= 2'b11;
-							3'b001 : sram_addr_mux		= 2'b10;
-							3'b010 : sram_addr_mux		= 2'b01;
-							3'b100 : sram_addr_mux		= 2'b11;
-							3'b101 : sram_addr_mux		= 2'b10;
-						endcase
+						sram_addr_mux = 2'b01;	// addr is decided directly not by PC...
 					end
 				end
 
@@ -281,15 +269,16 @@ always_comb begin
 						sram_addr_imm_mux = 2'b01; // use imm[31:25] imm[11:7]
 						// ==================================================
 						// SRAM_ADDR_WRITE_MUX (needs to separate because not same IMM.
+					// NOTE: This is just for the mask, we use BOTH write_en (1b) and wea_mask(4b)
+					// SO FOR WRITE YOU HAVE TO HAVE BOTH WRITE_MASK AND WRITE_EN
 						// ==================================================
-						// 00 		PC
-						// 01 		4 BYTE WORD
+						// 01 		1 BYTE 
 						// 10		2 BYTE HALFWORD
-						// 11		1 BYTE
+						// 11		4 BYTE WORD
 						case (ctrl_func3) 
-							3'b000 : sram_addr_mux 	= 2'b11;
-							3'b001 : sram_addr_mux 	= 2'b10;
-							3'b010 : sram_addr_mux	= 2'b01;
+							3'b000 : sram_addr_write_mux 	= 2'b01;
+							3'b001 : sram_addr_write_mux 	= 2'b10;
+							3'b010 : sram_addr_write_mux	= 2'b11;
 						endcase
 					end
 				end
@@ -396,6 +385,7 @@ ALU #(.BW(32)) alu(
 // ================================
 logic [31:0] 	sram_addr;
 logic [1:0]     sram_addr_low2bytes;
+logic [3:0] 	sram_write_mask;
 logic [31:0] 	sram_data_in;
 logic [31:0] 	sram_data_out;
 logic [31:0]	sram_data_out_masked;
@@ -405,7 +395,7 @@ mem_sys sram(
 	.rst_n(rst_n),
 	.addr(sram_addr),
 	.read_en(sram_read_en),
-	.write_en(sram_write_en),
+	.write_en(sram_write_mask),
 	.data_in(sram_data_in),
 	.data_out(sram_data_out),
 	.mem_ready(sram_mem_ready)
@@ -534,7 +524,38 @@ always_comb begin
                 end
                
                 default: sram_addr = PC;
-            endcase
+        endcase
+
+
+	// will set WEA to correct values depending on if bytes, halfs or words
+	// was specified. Should only be called when we are storing.
+	// NOTE: This is just for the mask, we use BOTH write_en (1b) and wea_mask(4b)
+	// SO FOR WRITE YOU HAVE TO HAVE BOTH WRITE_MASK AND WRITE_EN
+	case (sram_addr_write_mux)
+		2'b00 : sram_write_mask = 4'b0000;	// default case...
+		// SB, write mask is based on addr[1:0]
+		2'b01 : begin
+			case(sram_addr_low2bytes)
+				2'b00 : sram_write_mask = 4'b0001;
+				2'b01 : sram_write_mask = 4'b0010;
+				2'b10 : sram_write_mask = 4'b0100;
+				2'b11 : sram_write_mask = 4'b1000;
+			endcase
+		// SH store halfword upper or lower based on addr[1].
+		2'b10 : begin
+			case(sram_addr_low2bytes)
+				2'b00 : sram_write_mask = 4'b0011;
+				2'b10 : sram_write_mask = 4'b1100;
+			endcase
+		end
+		// SW entire word unchanged.
+		2'b11 : sram_write_mask = 4'b1111;
+		default: sram_write_mask = 4'b0000;
+	endcase;
+	
+
+
+	
 end;
 
 
