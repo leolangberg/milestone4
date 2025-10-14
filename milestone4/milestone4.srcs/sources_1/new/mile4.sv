@@ -267,6 +267,7 @@ always_comb begin
 						next_state = EXECUTE2;
 						sram_write_en = 1;
 						sram_addr_imm_mux = 2'b01; // use imm[31:25] imm[11:7]
+						sram_addr_mux = 2'b01;	// addr is decided directly not by PC...
 						// ==================================================
 						// SRAM_ADDR_WRITE_MUX (needs to separate because not same IMM.
 					// NOTE: This is just for the mask, we use BOTH write_en (1b) and wea_mask(4b)
@@ -307,6 +308,7 @@ module datapath (
 	input logic [2:0] sram_read_mask_mux,
 	input logic [1:0] sram_addr_mux,
 	input logic [1:0] sram_addr_imm_mux,
+	input logic [1:0] sram_addr_write_mux,
 	output logic sram_mem_ready,
 	output logic [6:0] ctrl_opcode,
 	output logic [2:0] ctrl_func3,
@@ -535,15 +537,16 @@ always_comb begin
 		2'b00 : sram_write_mask = 4'b0000;	// default case...
 		// SB, write mask is based on addr[1:0]
 		2'b01 : begin
-			case(sram_addr_low2bytes)
+			case(sram_addr[1:0])
 				2'b00 : sram_write_mask = 4'b0001;
 				2'b01 : sram_write_mask = 4'b0010;
 				2'b10 : sram_write_mask = 4'b0100;
 				2'b11 : sram_write_mask = 4'b1000;
 			endcase
+	    end
 		// SH store halfword upper or lower based on addr[1].
 		2'b10 : begin
-			case(sram_addr_low2bytes)
+			case(sram_addr[1:0])
 				2'b00 : sram_write_mask = 4'b0011;
 				2'b10 : sram_write_mask = 4'b1100;
 			endcase
