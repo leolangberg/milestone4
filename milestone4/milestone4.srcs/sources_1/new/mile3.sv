@@ -5,25 +5,25 @@ module mem_sys (
     // CPU side (byte-addressed)
     input  logic [31:0] addr,       // byte address
     input  logic        read_en,    // hold high until mem_ready
-    input  logic   write_en,   // byte enable per lane
+    input  logic [3:0] write_en,   // byte enable per lane
     input  logic [31:0] data_in,
     output logic [31:0] data_out,
     output logic        mem_ready
 );
 
-   
+    // Internal signals
     logic en, ren, wen;
     logic rst_busy;
     
     logic [3:0] weamask;
-    assign weamask = {4{write_en}};
+    assign weamask = write_en;
 
-   
+    // Gate accesses during reset
     assign wen = !rst_busy && (|weamask);
     assign ren = !rst_busy && read_en;
     assign en  = wen | ren;
 
-    // WE NEED RSTA_BUSY FOR 32BIT BYTE ADDRESSABLE MEM.
+    // Instantiate Vivado BRAM IP
     sram u_sram (
         .clka      (clk),
         .rsta      (!rst_n),
