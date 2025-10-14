@@ -394,12 +394,13 @@ ALU #(.BW(32)) alu(
 // Address is updated either via IR (PC)
 // or by "load" or "store" operations.
 // ================================
-logic [31:0] 	sram_addr; // not sure about size.
+logic [31:0] 	sram_addr;
+logic [1:0]     sram_addr_low2bytes;
 logic [31:0] 	sram_data_in;
 logic [31:0] 	sram_data_out;
 logic [31:0]	sram_data_out_masked;
 
-memory_system sram(
+mem_sys sram(
 	.clk(clk),
 	.rst_n(rst_n),
 	.addr(sram_addr),
@@ -454,11 +455,40 @@ always_comb begin
 		         // sram_data_out is masked for bytes (1b), halfwords (2b) , or words of (4b) (default).
                 // Also there are unsigned and signed extensions of bytes and halfwords.
                 case (sram_read_mask_mux)
+                    // LW loads entire word without any changes.
                     3'b000 : sram_data_out_masked = sram_data_out;
-                    3'b001 : sram_data_out_masked = {{16{sram_data_out[15]}}, sram_data_out[15:0]}; 
-                    3'b010 : sram_data_out_masked = {{24{sram_data_out[7]}}, sram_data_out[7:0]}; 
-                    3'b011 : sram_data_out_masked = {16'd0, sram_data_out[15:0]};
-                    3'b100 : sram_data_out_masked = {24'd0, sram_data_out[7:0]};
+                    // LH loads signed halfword based on addr[1]
+                    3'b001 : begin
+                        case (sram_addr_low2bytes)
+                                2'b00 : sram_data_out_masked = {{16{sram_data_out[15]}}, sram_data_out[15:0]};
+                                2'b10 : sram_data_out_masked = {sram_data_out[31:16], 16'd0};
+                            endcase
+                    end
+                    // LB load signed byte based on addr[1:0]
+                    3'b010 : begin
+                            case (sram_addr_low2bytes)
+                                2'b00 : sram_data_out_masked = {{24{sram_data_out[7]}}, sram_data_out[7:0]};
+                                2'b01 : sram_data_out_masked = {{16{sram_data_out[15]}}, sram_data_out[15:8], 8'd0};
+                                2'b10 : sram_data_out_masked = {{8{sram_data_out[23]}}, sram_data_out[23:16], 16'd0};
+                                2'b10 : sram_data_out_masked = {sram_data_out[31:24], 24'd0};   
+                            endcase
+                    end
+                    // LHU unsigned upper or lower halfword based on addr[1] signal.
+                    3'b011 : begin 
+                            case (sram_addr_low2bytes)
+                                2'b00 : sram_data_out_masked = {{16'd0}, sram_data_out[15:0]};
+                                2'b10 : sram_data_out_masked = {sram_data_out[31:16], 16'd0};
+                            endcase
+                    end
+                    // LBU unsigned byte based on addr[1:0]
+                    3'b100 : begin
+                         case (sram_addr_low2bytes)
+                                2'b00 : sram_data_out_masked = {24'd0, sram_data_out[7:0]};
+                                2'b01 : sram_data_out_masked = {16'd0, sram_data_out[15:8], 8'd0};
+                                2'b10 : sram_data_out_masked = {8'd0, sram_data_out[23:16], 16'd0};
+                                2'b10 : sram_data_out_masked = {sram_data_out[31:24], 24'd0};   
+                            endcase
+                   end
                    default: sram_data_out_masked = sram_data_out;
                 endcase 
 		      rf_data_in = sram_data_out_masked;
@@ -481,8 +511,11 @@ always_comb begin
 	
 	// Write data is specified by inside of register 2 [rs2].
 	sram_data_in = rf_data_out_2;
+	sram_addr_low2bytes = sram_addr[1:0];
 	
 	// SRAM_ADDR is either PC or direct value but this value has to be aligned.
+	// THERE IS NO NEED TO ALIGN HERE BECAUSE THIS MULTIPLE 4 ALIGNMENT IS HANDLE
+	// AUTOMATICALLY BY 32-BIT BYTE ADDRESSABLE MEMORY.
     // WORD  4 BYTE : address is aligned to multiple of 4.
     // HWORD 2 BYTE : address is aligned to multiple of 2.
     // BYTE	 1 BYTE : address can be any value.
@@ -497,27 +530,14 @@ always_comb begin
                         2'b00 : sram_addr_imm = imm;
                         2'b01 : sram_addr_imm = {20'd0,  IR[31:25], IR[11:7]};
                     endcase
-                    sram_addr = (rf_data_out_1 + sram_addr_imm) & ~(2'b11); // 4 byte
+                    sram_addr = (rf_data_out_1 + sram_addr_imm); 
                 end
-                2'b10 : begin
-                    case (sram_addr_imm_mux)
-                        2'b00 : sram_addr_imm = imm;
-                        2'b01 : sram_addr_imm = {20'd0,  IR[31:25], IR[11:7]};
-                    endcase
-                    sram_addr = (rf_data_out_1 + sram_addr_imm) & ~(1'b1);	// 2 byte
-                end
-                2'b11 : begin
-                    case (sram_addr_imm_mux)
-                        2'b00 : sram_addr_imm = imm;
-                        2'b01 : sram_addr_imm = {20'd0,  IR[31:25], IR[11:7]};
-                    endcase
-                    sram_addr = (rf_data_out_1 + sram_addr_imm);		// 1 byte
-                end
+               
                 default: sram_addr = PC;
             endcase
-
-	
 end;
+
+
 
 /* PROGRAM COUNTER */
 // Holds Instruction pointer Register (IR)
