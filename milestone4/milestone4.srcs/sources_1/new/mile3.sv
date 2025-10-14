@@ -1,79 +1,66 @@
-`timescale 1ns / 1ps
-//////////////////////////////////////////////////////////////////////////////////
-// Company: 
-// Engineer: 
-// 
-// Create Date: 14.10.2025 01:29:41
-// Design Name: 
-// Module Name: mem_sys
-// Project Name: 
-// Target Devices: 
-// Tool Versions: 
-// Description: 
-// 
-// Dependencies: 
-// 
-// Revision:
-// Revision 0.01 - File Created
-// Additional Comments:
-// 
-//////////////////////////////////////////////////////////////////////////////////
+module mem_sys (
+    input  logic        clk,
+    input  logic        rst_n,
 
-
-module mem_sys(
-      input  logic        clk,
-      input  logic        rst_n,
-    
-      // CPU side (byte-addressed)
-      input  logic [31:0] addr,       // byte address; word index = addr[15:2]
-      input  logic        read_en,    // hold high until mem_ready
-      input  logic        write_en,   // hold high until mem_ready
-      input  logic [31:0] data_in,
-      output logic [31:0] data_out,
-      output logic        mem_ready
+    // CPU side (byte-addressed)
+    input  logic [31:0] addr,       // byte address
+    input  logic        read_en,    // hold high until mem_ready
+    input  logic   write_en,   // byte enable per lane
+    input  logic [31:0] data_in,
+    output logic [31:0] data_out,
+    output logic        mem_ready
 );
 
-wire [13:0] addra_w = addr[15:2]; 
-logic en;
-logic [3:0] wea_mask;
+   
+    logic en, ren, wen;
+    logic rst_busy;
+    
+    logic [3:0] weamask;
+    assign weamask = {4{write_en}};
 
-sram u_sram (
-    .clka  (clk),
-    .ena   (en),
-    .wea   (wea_mask),         // 4 bits
-    .addra (addra_w),
-    .dina  (data_in),
-    .douta (data_out)
-  );
+   
+    assign wen = !rst_busy && (|weamask);
+    assign ren = !rst_busy && read_en;
+    assign en  = wen | ren;
 
-typedef enum logic [1:0] {IDLE, WAIT, DONE} state_t;
-  state_t pstate, nstate;
-  
- always_ff @(posedge clk or negedge rst_n) begin
-    if (!rst_n) pstate <= IDLE;
-    else        pstate <= nstate;
-  end
-  
-  always_comb begin 
-    en = read_en | write_en;
-    wea_mask = 4'b0000;
-    case (pstate) 
-        IDLE: if(read_en) begin
-                    nstate = WAIT;
-              end
-              else if(write_en) begin
-                    wea_mask = 4'b1111;
-                    nstate = DONE;
-              end else
-                    nstate = IDLE;
-        WAIT: nstate = DONE;
-        DONE: nstate = IDLE;
-        default: nstate = IDLE;
-    endcase
-  end
+    // WE NEED RSTA_BUSY FOR 32BIT BYTE ADDRESSABLE MEM.
+    sram u_sram (
+        .clka      (clk),
+        .rsta      (!rst_n),
+        .ena       (en),
+        .wea       (weamask),     // 4 bits = byte enables
+        .addra     (addr),         // full byte address
+        .dina      (data_in),
+        .douta     (data_out),
+        .rsta_busy  (rst_busy)
+    );
 
-assign mem_ready = (pstate == DONE);
+    // Simple FSM for memory handshake
+    typedef enum logic [1:0] {IDLE, WAIT, DONE} state_t;
+    state_t pstate, nstate;
 
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n)
+            pstate <= IDLE;
+        else
+            pstate <= nstate;
+    end
 
+    always_comb begin
+        nstate = pstate;
+        unique case (pstate)
+            IDLE: begin
+                if (ren)
+                    nstate = WAIT; // read takes one extra cycle
+                else if (wen)
+                    nstate = DONE; // write completes immediately
+            end
+
+            WAIT: nstate = DONE; // after read delay
+            DONE: nstate = IDLE;
+        endcase
+    end
+
+    assign mem_ready = (pstate == DONE);
 
 endmodule
