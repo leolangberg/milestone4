@@ -2,7 +2,14 @@
 module top (
 	input logic clk,
 	input logic rst_n,
-	input logic start
+	input logic start,
+	output logic read_en,
+	output logic write_en,
+	output logic mem_ready,
+	output logic [31:0] addr,
+	output logic [31:0] data_in,
+	output logic [31:0] data_out
+	
 );
 
 logic rf_chip_en;
@@ -77,10 +84,17 @@ datapath DP(
 	.branch_logic_mux(branch_logic_mux),
 	.branch(branch),
 	.jump_UJTYPE(jump_UJTYPE),
-	.jump_ITYPE(jump_ITYPE)
+	.jump_ITYPE(jump_ITYPE),
+	.addr(addr),
+	.data_in(data_in),
+	.data_out(data_out)
 	
 );
 
+assign read_en = sram_read_en;
+assign write_en = sram_write_en;
+assign mem_ready = sram_mem_ready;
+	
 endmodule;
 
 typedef enum logic [6:0] { 
@@ -378,6 +392,9 @@ endmodule;
 module datapath (
 	input logic clk,
 	input logic rst_n,
+	output logic [31:0] addr,
+	output logic [31:0] data_in,
+	output logic [31:0] data_out,
 
 
 	// Interface with Controller 
@@ -401,6 +418,7 @@ module datapath (
 	input logic branch,
 	input logic jump_UJTYPE,
 	input logic jump_ITYPE
+	
 );
 
 
@@ -712,4 +730,8 @@ always_ff @(posedge clk or negedge rst_n) begin
 	else if (load_IR)
 		IR <= sram_data_out;	// CHANGE TO SRAM_DATA_OUT_MASKED???
 end
+
+assign addr = sram_addr;
+assign data_in = sram_data_in;
+assign data_out = sram_data_out;
 endmodule;
