@@ -134,11 +134,13 @@ always_comb begin
 	sram_addr_mux		= 2'b00;
 	sram_addr_imm_mux	= 2'b00;
 	sram_addr_write_mux	= 2'b00;
-	alu_src 		= 2'b00;
+	alu_src 		     = 2'b00;
 	alu_opcode_mux 		= 3'b000;
 	load_PC 		= 0;
 	load_IR 		= 0;
 	rf_data_in_mux  	= 2'b00;
+	branch_logic_mux = 3'b000;
+	branch = 1'b0;
 
 	case (prev_state)
 		IDLE: next_state = start ? INIT : IDLE;
@@ -228,12 +230,16 @@ always_comb begin
 						3'b001 : alu_opcode_mux = 3'b010;
 						3'b100 : alu_opcode_mux = 3'b011;
 						3'b101 : alu_opcode_mux = 3'b011;
-						3'b110 : alu_opcode_mux = 3'b100;								  3'b111 : alu_opcode_mux = 3'b100;
-					end
+						3'b110 : alu_opcode_mux = 3'b100;								  
+						3'b111 : alu_opcode_mux = 3'b100;
+					endcase
 					// Logic for branch checking has same mux code as func3.
 					// 000, 001, 100, 101, 110, 111
 					branch_logic_mux = ctrl_func3;
 					branch = 1;
+					
+					sram_addr_mux = 2'b01;
+					sram_addr_imm_mux = 2'b10;
 					
 				end
 				default: begin
@@ -354,7 +360,7 @@ module datapath (
 );
 
 
-logic [31:0] PC; // PROGRAM COUNTER 
+logic signed [31:0] PC; // PROGRAM COUNTER 
 logic [31:0] IR; // INSTRUCTION REGISTER
 
 // ================================
@@ -370,7 +376,7 @@ logic [6:0] func7;
 logic [31:0] imm;	// originally [11:0] but sign extend.
 logic [31:0] shamt;	// originally [4:0]  but sign extend.
 // ================================
-logic [31:0] sram_addr_imm;
+logic signed [31:0] sram_addr_imm;
 logic branch_logic;
 // ================================
 
@@ -429,7 +435,7 @@ logic [31:0] 	sram_data_in;
 logic [31:0] 	sram_data_out;
 logic [31:0]	sram_data_out_masked;
 
-mem_sys sram(
+memory_system sram(
 	.clk(clk),
 	.rst_n(rst_n),
 	.addr(sram_addr),
@@ -530,7 +536,7 @@ always_comb begin
 	// There is also an fabricated SUB SLT SLTU for BRANCH comparison operations.
 	case (alu_opcode_mux) 
 		3'b000 : alu_opcode = {func3, func7[5]};
-		3'b001 : alu_opcode = {func3, 1'b0}
+		3'b001 : alu_opcode = {func3, 1'b0};
 		3'b010 : alu_opcode = 4'b0001;	// SUB
 		3'b011 : alu_opcode = 4'b0100;	// SLT
 		3'b100 : alu_opcode = 4'b0110;	// SLTU
@@ -560,14 +566,14 @@ always_comb begin
 	    // as part of address calculation.
 	// 00 for ITYPE IMM[31:0] 
 	// 01 for STYPE IMM[31:25] IMM[11:7]
-	// 10 for SBTYPE IMM[31] IMM[7] IMM[30:25] IMM[11:8]
+	// 10 for SBTYPE IMM[31] IMM[7] IMM[30:25] IMM[11:8] IMM HERE IS SIGNED SO IR[31] is sign...
 	case (sram_addr_mux) 
                 2'b00 : sram_addr = PC;
                 2'b01 : begin
                     case (sram_addr_imm_mux)
                         2'b00 : sram_addr_imm = imm;
                         2'b01 : sram_addr_imm = {20'd0, IR[31:25], IR[11:7]};	// STYPE IMM
-			2'b10 : sram_addr_imm = {19'd0, IR[31], IR[7], IR[30:25], IR[11:8], 1'b0} // SBTYPE IMM
+			            2'b10 : sram_addr_imm = {{19{IR[31]}}, IR[31], IR[7], IR[30:25], IR[11:8], 1'b0}; // SBTYPE IMM SIGNED
                     endcase
                     sram_addr = (rf_data_out_1 + sram_addr_imm); 
                 end
