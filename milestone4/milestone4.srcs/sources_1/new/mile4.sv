@@ -17,10 +17,12 @@ logic sram_mem_ready;
 logic load_IR;
 logic load_PC;
 logic [1:0] alu_src;
-logic alu_opcode_mux;
+logic [2:0] alu_opcode_mux;
 logic [6:0] ctrl_opcode;
 logic [2:0] ctrl_func3;
 logic [1:0] rf_data_in_mux;
+logic [2:0] branch_logic_mux;
+logic branch;
 
 controller CU (
 	.clk(clk),
@@ -42,7 +44,9 @@ controller CU (
 	.load_PC(load_PC),
 	.alu_opcode_mux(alu_opcode_mux),
 	.alu_src(alu_src),
-	.rf_data_in_mux(rf_data_in_mux)
+	.rf_data_in_mux(rf_data_in_mux),
+	.branch_logic_mux(branch_logic_mux),
+	.branch(branch)
 	
 );
 
@@ -65,7 +69,9 @@ datapath DP(
 	.load_PC(load_PC),
 	.alu_opcode_mux(alu_opcode_mux),
 	.alu_src(alu_src),
-	.rf_data_in_mux(rf_data_in_mux)
+	.rf_data_in_mux(rf_data_in_mux),
+	.branch_logic_mux(branch_logic_mux),
+	.branch(branch)
 	
 );
 
@@ -77,7 +83,8 @@ typedef enum logic [6:0] {
 	ITYPELOAD	= 7'b0000011,
 	UTYPELUI	= 7'b0110111,
 	UTYPEAUIPC	= 7'b0010111,
-	STYPE		= 7'b0100011
+	STYPE		= 7'b0100011,
+	SBTYPE		= 7'b1100011
 } instruction_opcode;
 
 /* CONTROLLER CU */
@@ -101,8 +108,10 @@ module controller (
 	output logic load_IR,
 	output logic load_PC,
 	output logic [1:0] alu_src,
-	output logic alu_opcode_mux,
-	output logic [1:0] rf_data_in_mux
+	output logic [2:0] alu_opcode_mux,
+	output logic [1:0] rf_data_in_mux,
+	output logic [2:0] branch_logic_mux,
+	output logic branch
 
 );
 
@@ -126,7 +135,7 @@ always_comb begin
 	sram_addr_imm_mux	= 2'b00;
 	sram_addr_write_mux	= 2'b00;
 	alu_src 		= 2'b00;
-	alu_opcode_mux 		= 0;
+	alu_opcode_mux 		= 3'b000;
 	load_PC 		= 0;
 	load_IR 		= 0;
 	rf_data_in_mux  	= 2'b00;
@@ -163,7 +172,7 @@ always_comb begin
 				RTYPE : begin
 					// RTYPE instructions read only from register 
 					// and use {func3, func7[5]}
-					alu_opcode_mux 	= 0;
+					alu_opcode_mux 	= 3'b000;
 					alu_src 	= 2'b00;
 					rf_write_en_n = 0;
 				end
@@ -171,12 +180,12 @@ always_comb begin
 					// ITYPE instructions read from imm
 					// and use {func3, 0} (except for SLL, SRL, SRA)
 					// SLL SRL SRA use func7[5] and immediate shift (shamt = imm[4:0])
-					alu_opcode_mux 	= 1;
+					alu_opcode_mux 	= 3'b001;
 					alu_src 	= 2'b01;
 					rf_write_en_n = 0;
 
 					if((ctrl_func3 == 3'b001) || (ctrl_func3 == 3'b101)) begin
-						alu_opcode_mux 	= 0;
+						alu_opcode_mux 	= 3'b000;
 						alu_src 	= 2'b10;
 					end
 				end
@@ -201,6 +210,30 @@ always_comb begin
 					// MEM[rs1 + imm] = [rs2]
 					next_state = EXECUTE2;
 					rf_write_en_n = 1;
+					
+				end
+				SBTYPE : begin
+					// BRANCH INSTRUCTIONS
+					// Reroute alu_opcode to perform comparison or sub.
+					// ==========================================
+					// BEQ	rs1 == rs2 	z=1 SUB	 000	0001
+					// BNE  rs1 != rs2	z=0 SUB	 001	0001
+					// BLT	rs1 < rs2 sign      SLT	 100	0100
+					// BGE  rs1 >= rs2 sign    ~SLT  101	0100
+					// BLTU rs1 < rs2 uns	    SLTU 110	0110
+					// BGEU rs1 >= rs2 uns	   ~SLTU 111	0110
+					rf_write_en_n = 1;
+					case (ctrl_opcode)
+						3'b000 : alu_opcode_mux = 3'b010;
+						3'b001 : alu_opcode_mux = 3'b010;
+						3'b100 : alu_opcode_mux = 3'b011;
+						3'b101 : alu_opcode_mux = 3'b011;
+						3'b110 : alu_opcode_mux = 3'b100;								  3'b111 : alu_opcode_mux = 3'b100;
+					end
+					// Logic for branch checking has same mux code as func3.
+					// 000, 001, 100, 101, 110, 111
+					branch_logic_mux = ctrl_func3;
+					branch = 1;
 					
 				end
 				default: begin
@@ -315,7 +348,9 @@ module datapath (
 	input logic load_IR,
 	input logic load_PC,
 	input logic alu_src,
-	input logic alu_opcode_mux
+	input logic [2:0] alu_opcode_mux,
+	input logic [2:0] branch_logic_mux,
+	input logic branch
 );
 
 
@@ -336,6 +371,8 @@ logic [31:0] imm;	// originally [11:0] but sign extend.
 logic [31:0] shamt;	// originally [4:0]  but sign extend.
 // ================================
 logic [31:0] sram_addr_imm;
+logic branch_logic;
+// ================================
 
 /* Register File */
 // 32-bit registers with 32 depth (5-bit addr).
@@ -488,16 +525,24 @@ always_comb begin
 	endcase
  
 	/* ALU CONNECTIONS */
-	// alu_opcode needs to ignore func7[5] for ITYPE instructions, we therefore
+	// ALU_OPCODE needs to ignore func7[5] for ITYPE instructions, we therefore
 	// have a mux with signal from controller based on instruction opcode.
+	// There is also an fabricated SUB SLT SLTU for BRANCH comparison operations.
+	case (alu_opcode_mux) 
+		3'b000 : alu_opcode = {func3, func7[5]};
+		3'b001 : alu_opcode = {func3, 1'b0}
+		3'b010 : alu_opcode = 4'b0001;	// SUB
+		3'b011 : alu_opcode = 4'b0100;	// SLT
+		3'b100 : alu_opcode = 4'b0110;	// SLTU
+
+	endcase
 	// alu_src decides to read from register (R) or immediate (I), or shamt (I).
-	alu_opcode 	= (alu_opcode_mux) ? {func3, 1'b0} : {func3, func7[5]}; 
-	alu_in_a 	= rf_data_out_1;
 	case (alu_src)
 		2'b00 : alu_in_b = rf_data_out_2;
 		2'b01 : alu_in_b = imm;
 		2'b10 : alu_in_b = shamt;
 	endcase
+	alu_in_a = rf_data_out_1;
 
 	/* SRAM CONNECTIONS */
 	
@@ -508,19 +553,21 @@ always_comb begin
 	// SRAM_ADDR is either PC or direct value but this value has to be aligned.
 	// THERE IS NO NEED TO ALIGN HERE BECAUSE THIS MULTIPLE 4 ALIGNMENT IS HANDLE
 	// AUTOMATICALLY BY 32-BIT BYTE ADDRESSABLE MEMORY.
-    // WORD  4 BYTE : address is aligned to multiple of 4.
-    // HWORD 2 BYTE : address is aligned to multiple of 2.
-    // BYTE	 1 BYTE : address can be any value.
-    // SRAM_ADDR_IMM Decides how to construct immediate value used 
-    // as part of address calculation.
+	    // WORD  4 BYTE : address is aligned to multiple of 4.
+	    // HWORD 2 BYTE : address is aligned to multiple of 2.
+	    // BYTE	 1 BYTE : address can be any value.
+	    // SRAM_ADDR_IMM Decides how to construct immediate value used 
+	    // as part of address calculation.
 	// 00 for ITYPE IMM[31:0] 
 	// 01 for STYPE IMM[31:25] IMM[11:7]
+	// 10 for SBTYPE IMM[31] IMM[7] IMM[30:25] IMM[11:8]
 	case (sram_addr_mux) 
                 2'b00 : sram_addr = PC;
                 2'b01 : begin
                     case (sram_addr_imm_mux)
                         2'b00 : sram_addr_imm = imm;
-                        2'b01 : sram_addr_imm = {20'd0,  IR[31:25], IR[11:7]};
+                        2'b01 : sram_addr_imm = {20'd0, IR[31:25], IR[11:7]};	// STYPE IMM
+			2'b10 : sram_addr_imm = {19'd0, IR[31], IR[7], IR[30:25], IR[11:8], 1'b0} // SBTYPE IMM
                     endcase
                     sram_addr = (rf_data_out_1 + sram_addr_imm); 
                 end
@@ -556,8 +603,23 @@ always_comb begin
 		default: sram_write_mask = 4'b0000;
 	endcase;
 	
-
-
+	/* BRANCH LOGIC */
+	// ==========================================
+	// BEQ	rs1 == rs2 	z=1 SUB	 000	0001
+	// BNE  rs1 != rs2	z=0 SUB	 001	0001
+	// BLT	rs1 < rs2 sign      SLT	 100	0100
+	// BGE  rs1 >= rs2 sign    ~SLT  101	0100
+	// BLTU rs1 < rs2 uns	    SLTU 110	0110
+	// BGEU rs1 >= rs2 uns	   ~SLTU 111	0110
+	case (branch_logic_mux) 
+		3'b000 : branch_logic = alu_flags[0]; // z-flag
+		3'b001 : branch_logic = ~(alu_flags[0]); // ~z
+		3'b100 : branch_logic = alu_out[0];	// SLT 1bit true/false
+		3'b101 : branch_logic = ~(alu_out[0]);  // ~SLT
+		3'b110 : branch_logic = alu_out[0];	// SLTU 1bit true/false
+		3'b111 : branch_logic = ~(alu_out[0]);  // ~SLTU
+		default: branch_logic = 1'b0;
+	endcase
 	
 end;
 
@@ -566,11 +628,16 @@ end;
 /* PROGRAM COUNTER */
 // Holds Instruction pointer Register (IR)
 // Updates PC = PC + 4 (increases addr).
+// if flag BRANCH is active AND BRANCH LOGIC == TRUE then we new PC += IMM
 always_ff @(posedge clk or negedge rst_n) begin
 	if(!rst_n) begin
 		PC <= '0;
 	end else if (load_PC) begin
-		PC <= PC + 4;
+		if (branch & branch_logic) begin
+			PC <= PC + sram_addr_imm;
+		end else begin
+			PC <= PC + 4;
+		end
 	end
 end
 
