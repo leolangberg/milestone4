@@ -570,7 +570,7 @@ always_comb begin
                         case (sram_addr_low2bytes)
                                 2'b00 : sram_data_out_masked = {{16{sram_data_out[15]}}, sram_data_out[15:0]};
                                 2'b10 : sram_data_out_masked = {sram_data_out[31:16], 16'd0};
-                            endcase
+                        endcase 
                     end
                     3'b010 : begin
                             // LB load signed byte based on addr[1:0]
@@ -596,6 +596,7 @@ always_comb begin
                                 2'b10 : sram_data_out_masked = {8'd0, sram_data_out[23:16], 16'd0};
                                 2'b11 : sram_data_out_masked = {sram_data_out[31:24], 24'd0};   
                             endcase
+                            sram_data_in = rf_data_out_2 << {8{sram_addr[1:0]}}; // sram_in = rf_out << 24, 16, 8, or 0
                    end
                    default: sram_data_out_masked = sram_data_out;
                 endcase 
@@ -663,6 +664,7 @@ always_comb begin
 	case (sram_addr_write_mux)
 		2'b00 : sram_write_mask = 4'b0000;	// default case...
 		// SB, write mask is based on addr[1:0]
+		// We shift the [rd2] data so that rd2[7:0] is the data written.
 		2'b01 : begin
 			case(sram_addr[1:0])
 				2'b00 : sram_write_mask = 4'b0001;
@@ -670,13 +672,16 @@ always_comb begin
 				2'b10 : sram_write_mask = 4'b0100;
 				2'b11 : sram_write_mask = 4'b1000;
 			endcase
+			sram_data_in = rf_data_out_2 << {sram_addr[1:0] * 8}; // sram_in = rf_out << 24, 16, 8, or 0
 	    end
 		// SH store halfword upper or lower based on addr[1].
+		// We shift the [rd2] data so that rd2[15:0] is the data written.
 		2'b10 : begin
 			case(sram_addr[1:0])
 				2'b00 : sram_write_mask = 4'b0011;
 				2'b10 : sram_write_mask = 4'b1100;
 			endcase
+			sram_data_in = rf_data_out_2 << {sram_addr[1] * 16};   // sram_in = rf_out << 16 or 0
 		end
 		// SW entire word unchanged.
 		2'b11 : sram_write_mask = 4'b1111;
