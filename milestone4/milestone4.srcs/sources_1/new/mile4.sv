@@ -23,7 +23,8 @@ logic [2:0] ctrl_func3;
 logic [2:0] rf_data_in_mux;
 logic [2:0] branch_logic_mux;
 logic branch;
-logic jump_PC;
+logic jump_UJTYPE;
+logic jump_ITYPE;
 
 controller CU (
 	.clk(clk),
@@ -48,7 +49,8 @@ controller CU (
 	.rf_data_in_mux(rf_data_in_mux),
 	.branch_logic_mux(branch_logic_mux),
 	.branch(branch),
-	.jump_PC(jump_PC)
+	.jump_UJTYPE(jump_UJTYPE),
+	.jump_ITYPE(jump_ITYPE)
 	
 );
 
@@ -74,7 +76,8 @@ datapath DP(
 	.rf_data_in_mux(rf_data_in_mux),
 	.branch_logic_mux(branch_logic_mux),
 	.branch(branch),
-	.jump_PC(jump_PC)
+	.jump_UJTYPE(jump_UJTYPE),
+	.jump_ITYPE(jump_ITYPE)
 	
 );
 
@@ -88,7 +91,8 @@ typedef enum logic [6:0] {
 	UTYPEAUIPC	= 7'b0010111,
 	STYPE		= 7'b0100011,
 	SBTYPE		= 7'b1100011,
-	UJTYPE      = 7'b1101111
+	UJTYPE      = 7'b1101111,
+	ITYPEJUMP   = 7'b1100111
 } instruction_opcode;
 
 /* CONTROLLER CU */
@@ -116,7 +120,8 @@ module controller (
 	output logic [2:0] rf_data_in_mux,
 	output logic [2:0] branch_logic_mux,
 	output logic branch,
-	output logic jump_PC
+	output logic jump_UJTYPE,
+	output logic jump_ITYPE
 
 );
 
@@ -146,7 +151,8 @@ always_comb begin
 	rf_data_in_mux  	= 3'b000;
 	branch_logic_mux = 3'b000;
 	branch = 1'b0;
-	jump_PC = 1'b0;
+	jump_UJTYPE = 1'b0;
+	jump_ITYPE = 1'b0;
 
 	case (prev_state)
 		IDLE: next_state = start ? INIT : IDLE;
@@ -203,6 +209,21 @@ always_comb begin
 					next_state = EXECUTE2;
 					rf_write_en_n = 1;
 				end
+				ITYPEJUMP : begin
+				    // JUMP INSTRUCTION JALr
+				    // [rd] = PC + 4, PC = ([RS1] + IMM)
+				    
+				    // RF in is PC + 4;
+				    rf_data_in_mux = 3'b011;
+				    rf_write_en_n = 0;
+				    jump_ITYPE = 1;
+				    
+				    // Choose address is from immediate value (not PC)
+					// immediate value is from ITYPE.
+					sram_addr_mux = 2'b01;
+					sram_addr_imm_mux = 2'b00;
+			
+				end
 				UTYPELUI : begin
 					// Load RD = {IMM[31:12], 12'd0} directly.
 					rf_data_in_mux = 2'b001;
@@ -257,7 +278,7 @@ always_comb begin
 				    // RF in is PC + 4;
 				    rf_data_in_mux = 3'b011;
 				    rf_write_en_n = 0;
-				    jump_PC = 1;
+				    jump_UJTYPE = 1;
 				    
 				    // Choose address is from immediate value (not PC)
 				    // immediate value is from UJTYPE
@@ -314,8 +335,7 @@ always_comb begin
 						next_state = EXECUTE2;
 						sram_read_en  	  = 1;
 						sram_addr_imm_mux = 2'b00; // use imm[31:0]
-						// ==================================================
-						sram_addr_mux = 2'b01;	// addr is decided directly not by PC...
+						sram_addr_mux = 2'b01;	   // addr is decided directly not by PC...
 					end
 				end
 
@@ -331,8 +351,8 @@ always_comb begin
 						sram_addr_mux = 2'b01;	// addr is decided directly not by PC...
 						// ==================================================
 						// SRAM_ADDR_WRITE_MUX (needs to separate because not same IMM.
-					// NOTE: This is just for the mask, we use BOTH write_en (1b) and wea_mask(4b)
-					// SO FOR WRITE YOU HAVE TO HAVE BOTH WRITE_MASK AND WRITE_EN
+					   // NOTE: This is just for the mask, we use BOTH write_en (1b) and wea_mask(4b)
+					   // SO FOR WRITE YOU HAVE TO HAVE BOTH WRITE_MASK AND WRITE_EN
 						// ==================================================
 						// 01 		1 BYTE 
 						// 10		2 BYTE HALFWORD
@@ -379,7 +399,8 @@ module datapath (
 	input logic [2:0] alu_opcode_mux,
 	input logic [2:0] branch_logic_mux,
 	input logic branch,
-	input logic jump_PC
+	input logic jump_UJTYPE,
+	input logic jump_ITYPE
 );
 
 
@@ -539,7 +560,7 @@ always_comb begin
                                 2'b00 : sram_data_out_masked = {{24{sram_data_out[7]}}, sram_data_out[7:0]};
                                 2'b01 : sram_data_out_masked = {{16{sram_data_out[15]}}, sram_data_out[15:8], 8'd0};
                                 2'b10 : sram_data_out_masked = {{8{sram_data_out[23]}}, sram_data_out[23:16], 16'd0};
-                                2'b10 : sram_data_out_masked = {sram_data_out[31:24], 24'd0};   
+                                2'b11 : sram_data_out_masked = {sram_data_out[31:24], 24'd0};   
                             endcase
                     end
                     3'b011 : begin 
@@ -555,7 +576,7 @@ always_comb begin
                                 2'b00 : sram_data_out_masked = {24'd0, sram_data_out[7:0]};
                                 2'b01 : sram_data_out_masked = {16'd0, sram_data_out[15:8], 8'd0};
                                 2'b10 : sram_data_out_masked = {8'd0, sram_data_out[23:16], 16'd0};
-                                2'b10 : sram_data_out_masked = {sram_data_out[31:24], 24'd0};   
+                                2'b11 : sram_data_out_masked = {sram_data_out[31:24], 24'd0};   
                             endcase
                    end
                    default: sram_data_out_masked = sram_data_out;
@@ -613,7 +634,6 @@ always_comb begin
                     endcase
                     sram_addr = (rf_data_out_1 + sram_addr_imm); 
                 end
-               
                 default: sram_addr = PC;
         endcase
 
@@ -666,15 +686,19 @@ always_comb begin
 end;
 
 /* PROGRAM COUNTER */
+// ============================================================
 // Holds Instruction pointer Register (IR)
 // Updates PC = PC + 4 (increases addr).
 // if flag BRANCH is active AND BRANCH LOGIC == TRUE then we new PC += IMM
+// JUMP_ITYPE is for JALR instruction. SRAM_ADDR = [rs1] + IMM already.
 always_ff @(posedge clk or negedge rst_n) begin
 	if(!rst_n) begin
 		PC <= '0;
 	end else if (load_PC) begin
-		if ((branch & branch_logic) | jump_PC) begin
-			PC <= PC + sram_addr_imm;
+		if ((branch & branch_logic) | jump_UJTYPE) begin
+			PC <= PC + sram_addr_imm;    
+		end else if (jump_ITYPE) begin
+		    PC <= (sram_addr & 32'hFFFFFFFE);
 		end else begin
 			PC <= PC + 4;
 		end
