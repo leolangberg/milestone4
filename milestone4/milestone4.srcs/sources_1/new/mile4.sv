@@ -20,9 +20,10 @@ logic [1:0] alu_src;
 logic [2:0] alu_opcode_mux;
 logic [6:0] ctrl_opcode;
 logic [2:0] ctrl_func3;
-logic [1:0] rf_data_in_mux;
+logic [2:0] rf_data_in_mux;
 logic [2:0] branch_logic_mux;
 logic branch;
+logic jump_PC;
 
 controller CU (
 	.clk(clk),
@@ -46,7 +47,8 @@ controller CU (
 	.alu_src(alu_src),
 	.rf_data_in_mux(rf_data_in_mux),
 	.branch_logic_mux(branch_logic_mux),
-	.branch(branch)
+	.branch(branch),
+	.jump_PC(jump_PC)
 	
 );
 
@@ -71,7 +73,8 @@ datapath DP(
 	.alu_src(alu_src),
 	.rf_data_in_mux(rf_data_in_mux),
 	.branch_logic_mux(branch_logic_mux),
-	.branch(branch)
+	.branch(branch),
+	.jump_PC(jump_PC)
 	
 );
 
@@ -84,7 +87,8 @@ typedef enum logic [6:0] {
 	UTYPELUI	= 7'b0110111,
 	UTYPEAUIPC	= 7'b0010111,
 	STYPE		= 7'b0100011,
-	SBTYPE		= 7'b1100011
+	SBTYPE		= 7'b1100011,
+	UJTYPE      = 7'b1101111
 } instruction_opcode;
 
 /* CONTROLLER CU */
@@ -109,9 +113,10 @@ module controller (
 	output logic load_PC,
 	output logic [1:0] alu_src,
 	output logic [2:0] alu_opcode_mux,
-	output logic [1:0] rf_data_in_mux,
+	output logic [2:0] rf_data_in_mux,
 	output logic [2:0] branch_logic_mux,
-	output logic branch
+	output logic branch,
+	output logic jump_PC
 
 );
 
@@ -138,9 +143,10 @@ always_comb begin
 	alu_opcode_mux 		= 3'b000;
 	load_PC 		= 0;
 	load_IR 		= 0;
-	rf_data_in_mux  	= 2'b00;
+	rf_data_in_mux  	= 3'b000;
 	branch_logic_mux = 3'b000;
 	branch = 1'b0;
+	jump_PC = 1'b0;
 
 	case (prev_state)
 		IDLE: next_state = start ? INIT : IDLE;
@@ -199,12 +205,12 @@ always_comb begin
 				end
 				UTYPELUI : begin
 					// Load RD = {IMM[31:12], 12'd0} directly.
-					rf_data_in_mux = 2'b01;
+					rf_data_in_mux = 2'b001;
 					rf_write_en_n = 0;
 				end
 				UTYPEAUIPC : begin
 					// Load RD = PC + {IMM[31:12], 12'd0} directly.
-					rf_data_in_mux = 2'b10;
+					rf_data_in_mux = 2'b010;
 					rf_write_en_n = 0;
 				end
 				STYPE : begin
@@ -238,9 +244,25 @@ always_comb begin
 					branch_logic_mux = ctrl_func3;
 					branch = 1;
 					
+					// Choose address is from immediate value (not PC)
+					// immediate value is from STYPE.
 					sram_addr_mux = 2'b01;
 					sram_addr_imm_mux = 2'b10;
 					
+				end
+				UJTYPE : begin
+				    // UNCONDITIONAL JUMP INSTRUCTION JAL
+				    // [rd] = PC + 4, PC = PC + IMM
+				    
+				    // RF in is PC + 4;
+				    rf_data_in_mux = 3'b011;
+				    rf_write_en_n = 0;
+				    jump_PC = 1;
+				    
+				    // Choose address is from immediate value (not PC)
+				    // immediate value is from UJTYPE
+				    sram_addr_mux = 2'b01;
+				    sram_addr_imm_mux = 2'b11;
 				end
 				default: begin
 					// This case is for invalid opcodes (shutdown).
@@ -265,7 +287,7 @@ always_comb begin
 					if(sram_mem_ready == 1'b1) begin
 						
 						next_state = FETCH;
-						rf_data_in_mux = 2'b11; // Read from SRAM into RF.
+						rf_data_in_mux = 2'b100; // Read from SRAM into RF.
                           			rf_write_en_n 	= 0;
 						
 						// ==================================================
@@ -341,7 +363,7 @@ module datapath (
 	// Interface with Controller 
 	input logic rf_chip_en,
 	input logic rf_write_en_n,
-	input logic [1:0] rf_data_in_mux,
+	input logic [2:0] rf_data_in_mux,
 	input logic sram_read_en,
 	input logic sram_write_en,
 	input logic [2:0] sram_read_mask_mux,
@@ -356,7 +378,8 @@ module datapath (
 	input logic alu_src,
 	input logic [2:0] alu_opcode_mux,
 	input logic [2:0] branch_logic_mux,
-	input logic branch
+	input logic branch,
+	input logic jump_PC
 );
 
 
@@ -480,27 +503,38 @@ always_comb begin
 	// =   Muxes that work together have to be nested otherwise bugs occur...  =
 	// =========================================================================
 	
-	// Special cases for UTYPE (LUI) and (AUIPC) that have direct link into rf_data_in.
-	// Last case is for Load instructions going from sram directly to rf_data_in.
+	/* RF_DATA_IN_MUX */
+	// =========================================================================
+	//  000    RF_in comes from ALU
+	//  001    special UTYPE (LUI)
+	//  010    special UTYPE (AUIPC)
+	//  011    special UJTYPE (JAL)
+	//  100    RF_in comes from SRAM out
 	case (rf_data_in_mux)
-		2'b00 : rf_data_in = alu_out;
-		2'b01 : rf_data_in = {IR[31:12], 12'd0};
-		2'b10 : rf_data_in = {IR[31:12], 12'd0} + PC;
-		2'b11 : begin
-		         // sram_data_out is masked for bytes (1b), halfwords (2b) , or words of (4b) (default).
-                // Also there are unsigned and signed extensions of bytes and halfwords.
+		3'b000 : rf_data_in = alu_out;
+		3'b001 : rf_data_in = {IR[31:12], 12'd0};
+		3'b010 : rf_data_in = {IR[31:12], 12'd0} + PC;
+		3'b011 : rf_data_in = (PC + 4);
+		3'b100 : begin
+		        /* SRAM_READ_MASK_MUX */
+                // =========================================================================
+                //  000     LW  4 bytes 1 choice     (mask = out)
+                //  001     LH  2 bytes 2 choices   (mask is upper or lower signed)  
+                //  010     LB  1 byte  4 choices    (signed)
+                //  011     LHU 2 bytes 2 choices       (unsigned)
+                //  100     LBU 1 byte  4 choices       (unsigned)
                 case (sram_read_mask_mux)
                     // LW loads entire word without any changes.
                     3'b000 : sram_data_out_masked = sram_data_out;
-                    // LH loads signed halfword based on addr[1]
                     3'b001 : begin
+                        // LH loads signed halfword based on addr[1]
                         case (sram_addr_low2bytes)
                                 2'b00 : sram_data_out_masked = {{16{sram_data_out[15]}}, sram_data_out[15:0]};
                                 2'b10 : sram_data_out_masked = {sram_data_out[31:16], 16'd0};
                             endcase
                     end
-                    // LB load signed byte based on addr[1:0]
                     3'b010 : begin
+                            // LB load signed byte based on addr[1:0]
                             case (sram_addr_low2bytes)
                                 2'b00 : sram_data_out_masked = {{24{sram_data_out[7]}}, sram_data_out[7:0]};
                                 2'b01 : sram_data_out_masked = {{16{sram_data_out[15]}}, sram_data_out[15:8], 8'd0};
@@ -508,15 +542,15 @@ always_comb begin
                                 2'b10 : sram_data_out_masked = {sram_data_out[31:24], 24'd0};   
                             endcase
                     end
-                    // LHU unsigned upper or lower halfword based on addr[1] signal.
                     3'b011 : begin 
+                            // LHU unsigned upper or lower halfword based on addr[1] signal
                             case (sram_addr_low2bytes)
                                 2'b00 : sram_data_out_masked = {{16'd0}, sram_data_out[15:0]};
                                 2'b10 : sram_data_out_masked = {sram_data_out[31:16], 16'd0};
                             endcase
-                    end
-                    // LBU unsigned byte based on addr[1:0]
+                    end 
                     3'b100 : begin
+                          // LBU unsigned byte based on addr[1:0]
                          case (sram_addr_low2bytes)
                                 2'b00 : sram_data_out_masked = {24'd0, sram_data_out[7:0]};
                                 2'b01 : sram_data_out_masked = {16'd0, sram_data_out[15:8], 8'd0};
@@ -527,7 +561,7 @@ always_comb begin
                    default: sram_data_out_masked = sram_data_out;
                 endcase 
 		      rf_data_in = sram_data_out_masked;
-		end
+		end	
 	endcase
  
 	/* ALU CONNECTIONS */
@@ -567,6 +601,7 @@ always_comb begin
 	// 00 for ITYPE IMM[31:0] 
 	// 01 for STYPE IMM[31:25] IMM[11:7]
 	// 10 for SBTYPE IMM[31] IMM[7] IMM[30:25] IMM[11:8] IMM HERE IS SIGNED SO IR[31] is sign...
+	// 11 for UJTYPE IMM[20] IMM[10:1] IMM[11], IMM [19:12]
 	case (sram_addr_mux) 
                 2'b00 : sram_addr = PC;
                 2'b01 : begin
@@ -574,6 +609,7 @@ always_comb begin
                         2'b00 : sram_addr_imm = imm;
                         2'b01 : sram_addr_imm = {20'd0, IR[31:25], IR[11:7]};	// STYPE IMM
 			            2'b10 : sram_addr_imm = {{19{IR[31]}}, IR[31], IR[7], IR[30:25], IR[11:8], 1'b0}; // SBTYPE IMM SIGNED
+			            2'b11 : sram_addr_imm = {{11{IR[20]}}, IR[19:12], IR[20], IR[31:21], 1'b0};  // UJTYPE IMM SIGNED
                     endcase
                     sram_addr = (rf_data_out_1 + sram_addr_imm); 
                 end
@@ -629,8 +665,6 @@ always_comb begin
 	
 end;
 
-
-
 /* PROGRAM COUNTER */
 // Holds Instruction pointer Register (IR)
 // Updates PC = PC + 4 (increases addr).
@@ -639,7 +673,7 @@ always_ff @(posedge clk or negedge rst_n) begin
 	if(!rst_n) begin
 		PC <= '0;
 	end else if (load_PC) begin
-		if (branch & branch_logic) begin
+		if ((branch & branch_logic) | jump_PC) begin
 			PC <= PC + sram_addr_imm;
 		end else begin
 			PC <= PC + 4;
