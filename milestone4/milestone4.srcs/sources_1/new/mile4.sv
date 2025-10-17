@@ -240,12 +240,12 @@ always_comb begin
 				end
 				UTYPELUI : begin
 					// Load RD = {IMM[31:12], 12'd0} directly.
-					rf_data_in_mux = 2'b001;
+					rf_data_in_mux = 3'b001;
 					rf_write_en_n = 0;
 				end
 				UTYPEAUIPC : begin
 					// Load RD = PC + {IMM[31:12], 12'd0} directly.
-					rf_data_in_mux = 2'b010;
+					rf_data_in_mux = 3'b010;
 					rf_write_en_n = 0;
 				end
 				STYPE : begin
@@ -266,7 +266,7 @@ always_comb begin
 					// BLTU rs1 < rs2 uns	    SLTU 110	0110
 					// BGEU rs1 >= rs2 uns	   ~SLTU 111	0110
 					rf_write_en_n = 1;
-					case (ctrl_opcode)
+					case (ctrl_func3)
 						3'b000 : alu_opcode_mux = 3'b010;
 						3'b001 : alu_opcode_mux = 3'b010;
 						3'b100 : alu_opcode_mux = 3'b011;
