@@ -322,7 +322,7 @@ always_comb begin
 					if(sram_mem_ready == 1'b1) begin
 						
 						next_state = FETCH;
-						rf_data_in_mux = 2'b100; // Read from SRAM into RF.
+						rf_data_in_mux = 3'b100; // Read from SRAM into RF.
                           			rf_write_en_n 	= 0;
 						
 						// ==================================================
